@@ -158,7 +158,7 @@ This allows you to work on both server and client locally, with auto-reload enab
 ## 📋 Additional Notes
 
 - Development work is done in feature branches; `main` remains stable.
-- Pull requests will trigger automated linting and formatting checks.
+- Pull requests will trigger automated **frontend** linting and formatting checks.
 - Backend is initially SQL Server-focused but architecture is extendable.
 
 ---

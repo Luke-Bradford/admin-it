@@ -3,7 +3,7 @@
 First off, thank you for considering contributing to Admin-IT!  
 Your help is what makes this project strong and sustainable.
 
-The following guidelines help ensure a smooth workflow for everyone involved.
+The following guidelines ensure a clean, consistent workflow for everyone involved.
 
 ---
 
@@ -11,52 +11,99 @@ The following guidelines help ensure a smooth workflow for everyone involved.
 
 1. **Fork the repository**  
 2. **Create a new feature branch**  
-   - Name it descriptively:  
-     `feature/user-authentication` or `bugfix/database-connection-timeout`
+   - Use descriptive branch names:  
+     - `feature/user-authentication`
+     - `bugfix/database-connection-timeout`
 3. **Commit your changes**  
-   - Write clear, concise commit messages.
-   - Example: `Fix: Correct table relationship handling for audit logs`
-4. **Push your branch**  
+   - Write clear, focused commit messages.  
+     Example:  
+     ```text
+     Fix: Correct table relationship handling for audit logs
+     ```
+4. **Push your branch**
 5. **Open a Pull Request (PR) against the `main` branch**  
-   - Include a clear description of what you changed and why.
+   - Include a clear description of *what* you changed and *why*.
 
 ---
 
-## 🧹 Code Style
+## 🧹 Code Style and Standards
 
-- Follow **Python best practices** (PEP8).
-- Use **clear and self-explanatory naming** for variables, functions, and files.
-- Keep changes **focused** — **one PR = one logical change**.
-- Format code consistently (use tools like `black` if needed).
+**Backend (Python - FastAPI)**:
+- Follow **PEP8** standards.
+- Use clear, descriptive naming for all variables, functions, and files.
+- Virtual environment (`venv`) usage is mandatory.
+- Consistent formatting is encouraged (e.g., use `black`, `flake8` locally if you want stricter checking).
+
+**Frontend (React + Vite)**:
+- Follow [Airbnb React/JSX Style Guide](https://github.com/airbnb/javascript/tree/master/react) principles.
+- **Prettier** and **ESLint** are preconfigured:
+  - Format your code using:
+    ```bash
+    npm run format
+    ```
+  - Check linting issues before committing:
+    ```bash
+    npm run lint
+    ```
+
+- **Do not disable ESLint rules unless absolutely necessary** (and explain if you do).
 
 ---
 
 ## 📋 Pull Request Requirements
 
-- The PR must **build and run cleanly** (no broken imports, no crashes).
-- If the PR adds new functionality, please **add/update documentation** where appropriate.
-- Tests are **encouraged** but **not mandatory yet** (formal test suite to be added later).
+- PRs must **build and run cleanly** (no runtime errors, no broken imports).
+- Backend: FastAPI server must start without errors.
+- Frontend: Vite server must start without errors.
+- PRs must **pass automated frontend lint/format checks** (they will run on GitHub automatically).
+- Keep PRs **focused** — one feature or fix per PR.
+- Update documentation (README.md, CONTRIBUTING.md) if your changes require it.
 
 ---
 
-## 🛠️ Environment Setup (Summary)
+## 🛠️ Environment Setup
 
-- Python 3.9+ required.
-- Virtual environment recommended.
-- Install requirements:
-  ```bash
-  pip install -r backend/requirements.txt
-  ```
-- Run development server:
-  ```bash
-  uvicorn app.main:app --reload
-  ```
+**Backend Setup**:
+```bash
+# In the project root
+python -m venv venv
+.\venv\Scripts\activate  # Windows
+source venv/bin/activate # Mac/Linux
+python -m pip install --upgrade pip
+pip install -r backend/requirements.txt
+uvicorn backend.app.main:app --reload
+```
+
+**Frontend Setup**:
+```bash
+# In the frontend folder
+npm install
+npm run dev
+```
 
 ---
 
-## 📣 Communication
+## 🧹 Before You Commit
 
-- Open an Issue if you encounter a problem or have a feature idea.
+1. Make sure backend and frontend servers run cleanly.
+2. Run frontend lint check:
+    ```bash
+    npm run lint
+    ```
+3. Auto-format if necessary:
+    ```bash
+    npm run format
+    ```
+4. Verify there are no new errors introduced.
+
+---
+
+## 🧠 Communication
+
+- Open an Issue for:
+  - Reporting bugs
+  - Suggesting improvements
+  - Proposing larger changes
 - Keep discussions **professional**, **direct**, and **solution-focused**.
 
 ---
@@ -67,4 +114,4 @@ By contributing, you agree that your code will be licensed under the [MIT Licens
 
 ---
 
-Thank you for your contribution and for making Admin-IT better! 🙌
+Thank you for your contribution and for making Admin-IT better!
