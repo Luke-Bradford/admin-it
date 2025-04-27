@@ -1,1 +1,16 @@
-*.DS_Store *.log docker-compose.override.yml 
+# Ignore virtual environments
+venv/
+
+# VSCode/Visual Studio files
+.vscode/
+.vs/
+
+# Python compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Env and system files
+.DS_Store
+.env
