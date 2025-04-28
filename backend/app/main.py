@@ -1,7 +1,7 @@
 from fastapi import FastAPI
+from app.routes import setup_routes
 
 app = FastAPI()
 
-@app.get("/")
-def read_root():
-    return {"message": "Admin-IT backend is live!"}
+# Register the setup route
+app.include_router(setup_routes.router)
