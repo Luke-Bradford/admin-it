@@ -1,3 +1,4 @@
+# backend/app/database/database_setup.py
 import pyodbc
 
 class DatabaseSetup:
@@ -74,7 +75,7 @@ if __name__ == "__main__":
     # Example usage
     connection_string = (
         "DRIVER={ODBC Driver 17 for SQL Server};"
-        "SERVER=localhost,1433;"
+        "SERVER=sqlserver,1433;"
         "DATABASE=master;"
         "UID=sa;"
         "PWD=YourStrong!Passw0rd"

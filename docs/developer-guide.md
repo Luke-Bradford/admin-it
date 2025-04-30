@@ -4,8 +4,8 @@
 
 ## 📋 Requirements
 
-- Python 3.9 or higher
-- Node.js 20 or higher
+- Python 3.9 or higher (ensure added to PATH)
+- Node.js 20 or higher (https://nodejs.org/en)
 - Git
 - Microsoft C++ Build Tools (for Python dependency compilation)
 
@@ -22,6 +22,12 @@
 
 2. **Create and activate a virtual environment**
 
+    Any issues activating, you may need to enable running scripts
+    ```bash
+    Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+    ```
+
+    Continue with install
     ```bash
     python -m venv venv
 
@@ -47,7 +53,8 @@
 5. **Run the backend server**
 
     ```bash
-    uvicorn backend.app.main:app --reload
+    cd backend
+    uvicorn app.main:app --reload
     ```
 
     Available at: [http://127.0.0.1:8000](http://127.0.0.1:8000)

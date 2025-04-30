@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
-from app.database.database_setup import create_schema_and_table, encrypt_connection_string
+from app.database.database_setup import DatabaseSetup
+from app.utils.secure_string import encrypt_connection_string
 from app.settings import SCHEMA_NAME
 
 router = APIRouter()
@@ -17,22 +18,27 @@ async def setup_database(connection_details: dict):
       "schema": "adm"
     }
     """
-
     try:
-        # Save the schema they passed
-        if "schema" in connection_details:
-            SCHEMA_NAME = connection_details["schema"]
+        schema = connection_details.get("schema", "adm")
 
-        # Build a raw connection string
-        connection_string = f"mssql+pyodbc://{connection_details['db_user']}:{connection_details['db_password']}@{connection_details['db_host']}:{connection_details['db_port']}/{connection_details['db_name']}?driver=ODBC+Driver+17+for+SQL+Server"
+        # Build raw pyodbc-style connection string
+        connection_string = (
+            f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+            f"SERVER={connection_details['db_host']},{connection_details['db_port']};"
+            f"DATABASE={connection_details['db_name']};"
+            f"UID={connection_details['db_user']};"
+            f"PWD={connection_details['db_password']}"
+        )
 
-        # Encrypt the connection string
+        # Optionally log (without password)
+        print("Connecting to DB at:", f"{connection_details['db_host']}:{connection_details['db_port']} / {connection_details['db_name']}")
+
+        # Encrypt if you're going to store it later
         encrypted_conn = encrypt_connection_string(connection_string)
 
-        # Run the database setup (schema + table)
-        create_schema_and_table(connection_details)
-
-        # (Optional) Save the encrypted_conn to your Connections table here if needed
+        # Run DB setup
+        db_setup = DatabaseSetup(conn_str=connection_string, schema=schema)
+        db_setup.run_setup()
 
         return {"status": "success", "message": "Database setup completed."}
     except Exception as e:

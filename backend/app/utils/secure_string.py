@@ -6,8 +6,8 @@ from cryptography.fernet import Fernet
 FERNET_KEY = Fernet.generate_key()
 fernet = Fernet(FERNET_KEY)
 
-def encrypt_string(value: str) -> str:
+def encrypt_connection_string (value: str) -> str:
     return fernet.encrypt(value.encode()).decode()
 
-def decrypt_string(value: str) -> str:
+def decrypt_connection_string(value: str) -> str:
     return fernet.decrypt(value.encode()).decode()
