@@ -4,6 +4,10 @@ from app.routes import setup_routes
 
 app = FastAPI()
 
+@app.get("/ping")
+def ping():
+    return {"message": "pong"}
+
 # Allow frontend to reach backend
 app.add_middleware(
     CORSMiddleware,
