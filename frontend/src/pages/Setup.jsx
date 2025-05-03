@@ -46,9 +46,19 @@ const Setup = () => {
       <h2>Database Setup</h2>
       <div>
         <input name="db_host" placeholder="DB Host" onChange={handleChange} />
-        <input name="db_port" placeholder="DB Port" value={formData.db_port} onChange={handleChange} />
+        <input
+          name="db_port"
+          placeholder="DB Port"
+          value={formData.db_port}
+          onChange={handleChange}
+        />
         <input name="db_user" placeholder="DB User" onChange={handleChange} />
-        <input name="db_password" placeholder="DB Password" type="password" onChange={handleChange} />
+        <input
+          name="db_password"
+          placeholder="DB Password"
+          type="password"
+          onChange={handleChange}
+        />
         <input name="db_name" placeholder="DB Name" onChange={handleChange} />
         <input name="schema" placeholder="Schema" value={formData.schema} onChange={handleChange} />
 
@@ -59,7 +69,9 @@ const Setup = () => {
         </select>
 
         <div style={{ marginTop: '1rem' }}>
-          <button onClick={handleTest} disabled={testing}>Test Connection</button>
+          <button onClick={handleTest} disabled={testing}>
+            Test Connection
+          </button>
           <button onClick={handleSubmit}>Submit</button>
         </div>
         <p>{message}</p>
