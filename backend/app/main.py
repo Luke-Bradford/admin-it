@@ -1,6 +1,9 @@
+# app/main.py
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import setup_routes
+from app.routes.setup_routes import router as setup_router
+from app.routes.discovery_routes import router as discovery_router
 
 app = FastAPI()
 
@@ -8,14 +11,15 @@ app = FastAPI()
 def ping():
     return {"message": "pong"}
 
-# Allow frontend to reach backend
+# CORS setup
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # <-- front-end address
+    allow_origins=["http://localhost:3000"],  # Adjust for prod if needed
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include setup API route
-app.include_router(setup_routes.router, prefix="/api")
+# Route registration with distinct prefixes
+app.include_router(setup_router, prefix="/api/setup", tags=["Setup"])
+app.include_router(discovery_router, prefix="/api/discover", tags=["Discovery"])

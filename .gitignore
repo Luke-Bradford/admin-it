@@ -14,3 +14,4 @@ __pycache__/
 # Env and system files
 .DS_Store
 .env
+/backend/core_connection.enc

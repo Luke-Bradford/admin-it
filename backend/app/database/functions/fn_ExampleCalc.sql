@@ -1,6 +1,0 @@
-CREATE OR ALTER FUNCTION {schema}.fn_ExampleCalc(@x INT)
-RETURNS INT
-AS
-BEGIN
-  RETURN @x * 42;
-END;

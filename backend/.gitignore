@@ -1,1 +1,4 @@
 __pycache__/ .env *.pyc *.pyo
+
+# Sensitive encrypted config
+core_connection.enc
