@@ -1,82 +1,107 @@
 .setup-container {
-  padding: 2rem;
-  color: white;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1rem;
 }
 
 .setup-title {
-  font-size: 1.8rem;
-  font-weight: bold;
   margin-bottom: 1rem;
+  color: #fff;
 }
 
+.message {
+  padding: 0.75rem 1rem;
+  border-radius: 4px;
+  margin-bottom: 1rem;
+  font-weight: 500;
+}
+
+  .message.success {
+    background: #2d6a4f;
+    color: #d8f3dc;
+  }
+
+  .message.error {
+    background: #7b2222;
+    color: #f8d7da;
+  }
+
+/* ─── flex container for the three cards ─── */
 .cards-row {
   display: flex;
-  flex-wrap: wrap;
-  gap: 2rem;
+  flex-direction: row;
+  flex-wrap: nowrap; /* ← never wrap into multiple lines */
+  justify-content: space-between;
+  gap: 1rem; /* gutter */
 }
 
+/* each individual card */
 .card {
-  background-color: #1e1e1e;
-  padding: 1.5rem;
-  border-radius: 0.5rem;
-  flex: 1 1 300px;
-  box-shadow: 0 0 10px rgba(255, 255, 255, 0.1);
+  flex: 1; /* share space equally */
+  min-width: 280px; /* never get too narrow */
+  background: #1e1e1e;
+  border-radius: 8px;
+  padding: 1.25rem;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+  color: #fff;
 }
 
 .form-grid {
   display: grid;
-  grid-template-columns: 1fr 2fr;
-  gap: 0.5rem 1rem;
-  align-items: center;
+  grid-template-columns: 1fr 1fr;
+  row-gap: 0.75rem;
+  column-gap: 1rem;
+  margin-bottom: 1rem;
 }
 
 .form-label {
-  font-weight: bold;
   font-size: 0.9rem;
+  color: #ddd;
+  align-self: center;
 }
 
 .form-input,
 .form-select {
-  padding: 0.4rem;
-  background: #2e2e2e;
+  width: 100%;
+  padding: 0.5rem;
+  border-radius: 4px;
   border: 1px solid #444;
-  color: white;
-  border-radius: 0.3rem;
+  background: #2b2b2b;
+  color: #fff;
+}
+
+.form-value {
+  font-size: 0.95rem;
+  color: #ccc;
+  align-self: center;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.database-picker {
+  display: flex;
+  gap: 0.5rem;
 }
 
 .button-row {
-  display: flex;
-  gap: 1rem;
-  margin-top: 1rem;
-  flex-wrap: wrap;
+  text-align: right;
 }
 
-button {
-  background-color: #3b82f6;
-  color: white;
-  padding: 0.5rem 1rem;
-  border: none;
-  border-radius: 0.3rem;
-  cursor: pointer;
-  font-weight: bold;
+  .button-row button {
+    margin-left: 0.5rem;
+    padding: 0.5rem 1rem;
+    border: none;
+    background: #2978b5;
+    color: #fff;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+.success-text {
+  color: #8fd19e;
+  font-size: 0.95rem;
 }
-
-  button:hover {
-    background-color: #2563eb;
-  }
-
-.message {
-  padding: 0.75rem;
-  margin-bottom: 1rem;
-  border-radius: 0.4rem;
-}
-
-  .message.success {
-    background-color: #16a34a;
-    color: white;
-  }
-
-  .message.error {
-    background-color: #dc2626;
-    color: white;
-  }
