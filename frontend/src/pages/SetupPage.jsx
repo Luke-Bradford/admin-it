@@ -2,29 +2,29 @@ import React, { useState, useEffect } from 'react';
 import './SetupPage.css';
 
 export default function SetupPage() {
-  // form fields
   const [host, setHost] = useState('');
+  const [useLocalhostAlias, setUseLocalhostAlias] = useState(false);
   const [port, setPort] = useState(1433);
   const [user, setUser] = useState('');
   const [password, setPassword] = useState('');
   const [database, setDatabase] = useState('');
+  const [availableDatabases, setAvailableDatabases] = useState([]);
   const [schema, setSchema] = useState('adm');
   const [driver, setDriver] = useState('ODBC Driver 17 for SQL Server');
 
-  // status
   const [configured, setConfigured] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [connection, setConnection] = useState(null);
-  const [missing, setMissing] = useState({
-    tables: [],
-    views: [],
-    procedures: [],
-    functions: [],
-  });
+  const [schemaDeployed, setSchemaDeployed] = useState(false);
+  const [adminCreated, setAdminCreated] = useState(false);
   const [message, setMessage] = useState(null);
-  const [messageType, setMessageType] = useState(''); // "error" or "success"
+  const [messageType, setMessageType] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // load initial config
+  const [adminUsername, setAdminUsername] = useState('');
+  const [adminEmail, setAdminEmail] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
+
   useEffect(() => {
     fetch('/api/setup')
       .then((r) => r.json())
@@ -32,7 +32,6 @@ export default function SetupPage() {
         if (data.configured) {
           setConfigured(true);
           setConnection(data.connection);
-          // prefill form in case of edit
           const d = data.connection;
           setHost(d.db_host);
           setPort(d.db_port);
@@ -41,125 +40,95 @@ export default function SetupPage() {
           setDatabase(d.db_name);
           setSchema(d.schema);
           setDriver(d.odbc_driver);
-          refreshSchemaStatus();
+          checkDeployStatus();
         }
       })
-      .catch((e) => console.error('Could not load setup:', e));
+      .catch(() => { });
   }, []);
 
-  // fetch schema-status
-  function refreshSchemaStatus() {
-    fetch('/api/schema-status')
-      .then((r) => {
-        if (!r.ok) throw new Error(`Status ${r.status}`);
-        return r.json();
-      })
-      .then((data) => setMissing(data.missing))
-      .catch((e) => {
-        console.error('schema-status error:', e);
-        setMissing({ tables: [], views: [], procedures: [], functions: [] });
-      });
-  }
-
-  // test connection
-  function handleTest() {
-    setLoading(true);
-    setMessage(null);
-    fetch('/api/test-connection', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        db_host: host,
-        db_port: port,
-        db_user: user,
-        db_password: password,
-        db_name: database,
-        schema,
-        odbc_driver: driver,
-      }),
-    })
-      .then(async (r) => {
-        setLoading(false);
-        const body = await r.json();
-        if (!r.ok) throw new Error(body.detail || body.message);
-        setMessage(body.message);
-        setMessageType('success');
-      })
-      .catch((e) => {
-        setLoading(false);
-        setMessage(e.message);
-        setMessageType('error');
-      });
-  }
-
-  // submit setup
-  function handleSubmit() {
-    setLoading(true);
-    setMessage(null);
-    fetch('/api/setup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        db_host: host,
-        db_port: port,
-        db_user: user,
-        db_password: password,
-        db_name: database,
-        schema,
-        odbc_driver: driver,
-      }),
-    })
-      .then(async (r) => {
-        setLoading(false);
-        const body = await r.json();
-        if (!r.ok) throw new Error(body.detail || body.message);
-        setConfigured(true);
-        setConnection(body.connection);
-        setMessage(body.message);
-        setMessageType('success');
-        refreshSchemaStatus();
-      })
-      .catch((e) => {
-        setLoading(false);
-        setMessage(e.message);
-        setMessageType('error');
-      });
-  }
-
-  // delete config
-  function handleDelete() {
-    fetch('/api/setup', { method: 'DELETE' })
+  function checkDeployStatus() {
+    fetch('/api/setup/deploy-status')
       .then((r) => r.json())
-      .then(() => {
-        setConfigured(false);
-        setConnection(null);
-        setMissing({ tables: [], views: [], procedures: [], functions: [] });
-        setMessage('Configuration deleted.');
-        setMessageType('success');
+      .then((data) => {
+        setSchemaDeployed(data.deployed);
+        if (data.deployed) checkAdminStatus();
       })
-      .catch((e) => {
-        console.error('delete error:', e);
-        setMessage('Could not delete config');
-        setMessageType('error');
-      });
+      .catch(() => setSchemaDeployed(false));
   }
 
-  // deploy missing objects
-  async function handleDeploy() {
+  function checkAdminStatus() {
+    fetch('/api/setup/admin-status')
+      .then((r) => r.json())
+      .then((data) => setAdminCreated(data.present))
+      .catch(() => setAdminCreated(false));
+  }
+
+  function handleEdit() {
+    setEditing(true);
+  }
+
+  function handleCancelEdit() {
+    setEditing(false);
+    if (connection) {
+      const d = connection;
+      setHost(d.db_host);
+      setPort(d.db_port);
+      setUser(d.db_user);
+      setPassword('');
+      setDatabase(d.db_name);
+      setSchema(d.schema);
+      setDriver(d.odbc_driver);
+    }
+  }
+
+  async function fetchDatabases() {
     setLoading(true);
+    setMessage(null);
     try {
-      const res = await fetch('/api/deploy', { method: 'POST' });
-      if (!res.ok) {
-        const err = await res.text();
-        throw new Error(err);
-      }
+      const res = await fetch('/api/discover/databases', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          host,
+          port,
+          user,
+          password,
+          driver,
+          use_localhost_alias: useLocalhostAlias,
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.detail || 'Error fetching databases');
+      setAvailableDatabases(body.databases);
+    } catch (e) {
+      alert(`Failed to list databases:\n${e.message}`);
+    } finally {
+      setLoading(false);
+    }
+  }
 
-      setMessage('Deployed missing objects.');
+  async function handleTestConnection() {
+    setLoading(true);
+    setMessage(null);
+    try {
+      const res = await fetch('/api/setup/test-connection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          db_host: host,
+          db_port: port,
+          db_user: user,
+          db_password: password,
+          db_name: database,
+          schema,
+          odbc_driver: driver,
+          use_localhost_alias: useLocalhostAlias,
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.detail || body.message);
+      setMessage(body.message);
       setMessageType('success');
-
-      // now re‑fetch your status
-      const status = await fetch('/api/schema-status').then((r) => r.json());
-      setMissing(status.missing);
     } catch (e) {
       setMessage(e.message);
       setMessageType('error');
@@ -168,139 +137,210 @@ export default function SetupPage() {
     }
   }
 
-  // toggle back to edit mode
-  function handleEdit() {
-    setConfigured(false);
+  async function handleSubmit() {
+    setLoading(true);
     setMessage(null);
-    setMessageType('');
+    try {
+      const res = await fetch('/api/setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          db_host: host,
+          db_port: port,
+          db_user: user,
+          db_password: password,
+          db_name: database,
+          schema,
+          odbc_driver: driver,
+          use_localhost_alias: useLocalhostAlias,
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.detail || body.message);
+      setConfigured(true);
+      setConnection(body.connection);
+      setMessage(body.message);
+      setMessageType('success');
+      setEditing(false);
+      checkDeployStatus();
+    } catch (e) {
+      setMessage(e.message);
+      setMessageType('error');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function deploySchema() {
+    setLoading(true);
+    setMessage(null);
+    try {
+      const res = await fetch('/api/setup/deploy-schema', { method: 'POST' });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.detail || 'Deployment failed');
+      setSchemaDeployed(true);
+      setMessage(body.message);
+      setMessageType('success');
+      checkAdminStatus();
+    } catch (e) {
+      setMessage(e.message);
+      setMessageType('error');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleCreateAdmin() {
+    setLoading(true);
+    setMessage(null);
+    try {
+      const res = await fetch('/api/setup/create-admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: adminUsername,
+          email: adminEmail,
+          password: adminPassword,
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.detail || body.message);
+      setAdminCreated(true);
+      setMessage(body.message);
+      setMessageType('success');
+    } catch (e) {
+      setMessage(e.message);
+      setMessageType('error');
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
     <div className="setup-container">
       <h1 className="setup-title">Core Database Setup</h1>
       {message && <div className={`message ${messageType}`}>{message}</div>}
-      <div className="cards">
-        {/* ─── CONFIGURE CARD ───────────────────────────────────── */}
+      <div className="cards-row">
+        {/* Database Connection */}
         <div className="card">
-          {configured ? (
-            <>
-              <h2>Configured Connection</h2>
-              <p>
-                <strong>Host:</strong> {connection.db_host}
-              </p>
-              <p>
-                <strong>Port:</strong> {connection.db_port}
-              </p>
-              <p>
-                <strong>User:</strong> {connection.db_user}
-              </p>
-              <p>
-                <strong>Database:</strong> {connection.db_name}
-              </p>
-              <p>
-                <strong>Schema:</strong> {connection.schema}
-              </p>
-              <p>
-                <strong>Driver:</strong> {connection.odbc_driver}
-              </p>
-              <div className="buttons">
-                <button onClick={handleEdit}>Edit</button>
-                <button className="danger" onClick={handleDelete}>
-                  Delete
-                </button>
+          <h2>Database Connection</h2>
+          <div className="form-grid">
+            {/* Fields */}
+            <label className="form-label">Host</label>
+            {editing || !configured ? (
+              <input className="form-input" value={host} onChange={(e) => setHost(e.target.value)} />
+            ) : (
+              <div className="form-value">{host}</div>
+            )}
+            <label className="form-label">Use Localhost Alias</label>
+            {editing || !configured ? (
+              <div className="checkbox-row">
+                <input type="checkbox" checked={useLocalhostAlias} onChange={(e) => setUseLocalhostAlias(e.target.checked)} />
+                <label>localhost - docker</label>
               </div>
-            </>
-          ) : (
-            <>
-              <div className="form-grid">
-                <label className="form-label">Host</label>
-                <input
-                  className="form-input"
-                  value={host}
-                  onChange={(e) => setHost(e.target.value)}
-                />
-                <label className="form-label">Port</label>
-                <input
-                  type="number"
-                  className="form-input"
-                  value={port}
-                  onChange={(e) => setPort(+e.target.value)}
-                />
-                <label className="form-label">User</label>
-                <input
-                  className="form-input"
-                  value={user}
-                  onChange={(e) => setUser(e.target.value)}
-                />
-                <label className="form-label">Password</label>
-                <input
-                  type="password"
-                  className="form-input"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-                <label className="form-label">Database</label>
-                <input
-                  className="form-input"
-                  value={database}
-                  onChange={(e) => setDatabase(e.target.value)}
-                />
-                <label className="form-label">Schema</label>
-                <input
-                  className="form-input"
-                  value={schema}
-                  onChange={(e) => setSchema(e.target.value)}
-                />
-                <label className="form-label">ODBC Driver</label>
-                <select
-                  className="form-select"
-                  value={driver}
-                  onChange={(e) => setDriver(e.target.value)}
-                >
-                  <option>ODBC Driver 17 for SQL Server</option>
-                  <option>ODBC Driver 18 for SQL Server</option>
+            ) : (
+              <div className="form-value">{useLocalhostAlias ? 'Yes' : 'No'}</div>
+            )}
+            <label className="form-label">Port</label>
+            {editing || !configured ? (
+              <input className="form-input" value={port} onChange={(e) => setPort(+e.target.value)} />
+            ) : (
+              <div className="form-value">{port}</div>
+            )}
+            <label className="form-label">User</label>
+            {editing || !configured ? (
+              <input className="form-input" value={user} onChange={(e) => setUser(e.target.value)} />
+            ) : (
+              <div className="form-value">{user}</div>
+            )}
+            <label className="form-label">Password</label>
+            {editing || !configured ? (
+              <input className="form-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+            ) : (
+              <div className="form-value">********</div>
+            )}
+            <label className="form-label">Database</label>
+            {editing || !configured ? (
+              <div className="form-input database-picker">
+                <select value={database} onChange={(e) => setDatabase(e.target.value)} className="form-select">
+                  <option value="">-- Select Database --</option>
+                  {availableDatabases.map((db) => <option key={db} value={db}>{db}</option>)}
                 </select>
+                <button onClick={fetchDatabases}>🔍</button>
               </div>
-              <div className="button-row">
-                <button onClick={handleTest} disabled={loading}>
-                  Test Connection
-                </button>
-                <button onClick={handleSubmit} disabled={loading}>
-                  Submit
-                </button>
-              </div>
-            </>
-          )}
+            ) : (
+              <div className="form-value">{database}</div>
+            )}
+            <label className="form-label">Schema</label>
+            {editing || !configured ? (
+              <input className="form-input" value={schema} onChange={(e) => setSchema(e.target.value)} />
+            ) : (
+              <div className="form-value">{schema}</div>
+            )}
+            <label className="form-label">Driver</label>
+            {editing || !configured ? (
+              <select className="form-select" value={driver} onChange={(e) => setDriver(e.target.value)}>
+                <option>ODBC Driver 17 for SQL Server</option>
+                <option>ODBC Driver 18 for SQL Server</option>
+              </select>
+            ) : (
+              <div className="form-value">{driver}</div>
+            )}
+          </div>
+          <div className="button-row">
+            {editing || !configured ? (
+              <>
+                <button onClick={handleTestConnection} disabled={loading}>Test</button>
+                <button onClick={handleSubmit} disabled={loading}>Submit</button>
+                {configured && <button onClick={handleCancelEdit} disabled={loading}>Cancel</button>}
+              </>
+            ) : (
+              <button onClick={handleEdit}>Edit</button>
+            )}
+          </div>
         </div>
 
-        {/* ─── DEPLOY CARD ───────────────────────────────────── */}
+        {/* Schema Deployment */}
         {configured && (
           <div className="card">
-            <h2>Deploy Core Schema</h2>
-
-            {/* all deployed */}
-            {missing.tables.length === 0 &&
-            missing.views.length === 0 &&
-            missing.procedures.length === 0 &&
-            missing.functions.length === 0 ? (
-              <p>✅ All core schema objects are deployed.</p>
+            <h2>Schema Deployment</h2>
+            {schemaDeployed ? (
+              <p className="success-text">Schema is already deployed.</p>
             ) : (
               <>
-                {missing.tables.length > 0 && <p>Missing tables: {missing.tables.join(', ')}</p>}
-                {missing.views.length > 0 && <p>Missing views: {missing.views.join(', ')}</p>}
-                {missing.procedures.length > 0 && (
-                  <p>Missing procs: {missing.procedures.join(', ')}</p>
-                )}
-                {missing.functions.length > 0 && (
-                  <p>Missing functions: {missing.functions.join(', ')}</p>
-                )}
-
-                <button onClick={handleDeploy} disabled={loading}>
-                  {loading ? 'Deploying…' : 'Deploy Missing'}
-                </button>
+                <p>The core schema has not been deployed yet.</p>
+                <button onClick={deploySchema} disabled={loading}>Deploy Schema</button>
               </>
             )}
           </div>
+        )}
+
+        {/* Admin Panel or Placeholder */}
+        {configured && (
+          schemaDeployed ? (
+            <div className="card">
+              <h2>Create Admin User</h2>
+              {!adminCreated ? (
+                <>
+                  <div className="form-grid">
+                    <label className="form-label">Username</label>
+                    <input className="form-input" value={adminUsername} onChange={(e) => setAdminUsername(e.target.value)} />
+                    <label className="form-label">Email</label>
+                    <input className="form-input" value={adminEmail} onChange={(e) => setAdminEmail(e.target.value)} />
+                    <label className="form-label">Password</label>
+                    <input className="form-input" type="password" value={adminPassword} onChange={(e) => setAdminPassword(e.target.value)} />
+                  </div>
+                  <div className="button-row">
+                    <button onClick={handleCreateAdmin} disabled={loading}>Create Admin</button>
+                  </div>
+                </>
+              ) : (
+                <p className="success-text">SystemAdmin user already exists.</p>
+              )}
+            </div>
+          ) : (
+            <div className="card placeholder" />
+          )
         )}
       </div>
     </div>
