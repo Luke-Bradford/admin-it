@@ -16,15 +16,15 @@
   font-weight: 500;
 }
 
-  .message.success {
-    background: #2d6a4f;
-    color: #d8f3dc;
-  }
+.message.success {
+  background: #2d6a4f;
+  color: #d8f3dc;
+}
 
-  .message.error {
-    background: #7b2222;
-    color: #f8d7da;
-  }
+.message.error {
+  background: #7b2222;
+  color: #f8d7da;
+}
 
 /* ─── flex container for the three cards ─── */
 .cards-row {
@@ -42,7 +42,7 @@
   background: #1e1e1e;
   border-radius: 8px;
   padding: 1.25rem;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
   color: #fff;
 }
 
@@ -91,15 +91,15 @@
   text-align: right;
 }
 
-  .button-row button {
-    margin-left: 0.5rem;
-    padding: 0.5rem 1rem;
-    border: none;
-    background: #2978b5;
-    color: #fff;
-    border-radius: 4px;
-    cursor: pointer;
-  }
+.button-row button {
+  margin-left: 0.5rem;
+  padding: 0.5rem 1rem;
+  border: none;
+  background: #2978b5;
+  color: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+}
 
 .success-text {
   color: #8fd19e;
