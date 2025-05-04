@@ -1,15 +1,15 @@
-import React, { useState, useEffect } from "react";
-import "./SetupPage.css";
+import React, { useState, useEffect } from 'react';
+import './SetupPage.css';
 
 export default function SetupPage() {
   // form fields
-  const [host, setHost] = useState("");
+  const [host, setHost] = useState('');
   const [port, setPort] = useState(1433);
-  const [user, setUser] = useState("");
-  const [password, setPassword] = useState("");
-  const [database, setDatabase] = useState("");
-  const [schema, setSchema] = useState("adm");
-  const [driver, setDriver] = useState("ODBC Driver 17 for SQL Server");
+  const [user, setUser] = useState('');
+  const [password, setPassword] = useState('');
+  const [database, setDatabase] = useState('');
+  const [schema, setSchema] = useState('adm');
+  const [driver, setDriver] = useState('ODBC Driver 17 for SQL Server');
 
   // status
   const [configured, setConfigured] = useState(false);
@@ -18,15 +18,15 @@ export default function SetupPage() {
     tables: [],
     views: [],
     procedures: [],
-    functions: []
+    functions: [],
   });
   const [message, setMessage] = useState(null);
-  const [messageType, setMessageType] = useState(""); // "error" or "success"
+  const [messageType, setMessageType] = useState(''); // "error" or "success"
   const [loading, setLoading] = useState(false);
 
   // load initial config
   useEffect(() => {
-    fetch("/api/setup")
+    fetch('/api/setup')
       .then((r) => r.json())
       .then((data) => {
         if (data.configured) {
@@ -37,26 +37,26 @@ export default function SetupPage() {
           setHost(d.db_host);
           setPort(d.db_port);
           setUser(d.db_user);
-          setPassword("");
+          setPassword('');
           setDatabase(d.db_name);
           setSchema(d.schema);
           setDriver(d.odbc_driver);
           refreshSchemaStatus();
         }
       })
-      .catch((e) => console.error("Could not load setup:", e));
+      .catch((e) => console.error('Could not load setup:', e));
   }, []);
 
   // fetch schema-status
   function refreshSchemaStatus() {
-    fetch("/api/schema-status")
+    fetch('/api/schema-status')
       .then((r) => {
         if (!r.ok) throw new Error(`Status ${r.status}`);
         return r.json();
       })
       .then((data) => setMissing(data.missing))
       .catch((e) => {
-        console.error("schema-status error:", e);
+        console.error('schema-status error:', e);
         setMissing({ tables: [], views: [], procedures: [], functions: [] });
       });
   }
@@ -65,9 +65,9 @@ export default function SetupPage() {
   function handleTest() {
     setLoading(true);
     setMessage(null);
-    fetch("/api/test-connection", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+    fetch('/api/test-connection', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         db_host: host,
         db_port: port,
@@ -83,12 +83,12 @@ export default function SetupPage() {
         const body = await r.json();
         if (!r.ok) throw new Error(body.detail || body.message);
         setMessage(body.message);
-        setMessageType("success");
+        setMessageType('success');
       })
       .catch((e) => {
         setLoading(false);
         setMessage(e.message);
-        setMessageType("error");
+        setMessageType('error');
       });
   }
 
@@ -96,9 +96,9 @@ export default function SetupPage() {
   function handleSubmit() {
     setLoading(true);
     setMessage(null);
-    fetch("/api/setup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+    fetch('/api/setup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         db_host: host,
         db_port: port,
@@ -116,31 +116,31 @@ export default function SetupPage() {
         setConfigured(true);
         setConnection(body.connection);
         setMessage(body.message);
-        setMessageType("success");
+        setMessageType('success');
         refreshSchemaStatus();
       })
       .catch((e) => {
         setLoading(false);
         setMessage(e.message);
-        setMessageType("error");
+        setMessageType('error');
       });
   }
 
   // delete config
   function handleDelete() {
-    fetch("/api/setup", { method: "DELETE" })
+    fetch('/api/setup', { method: 'DELETE' })
       .then((r) => r.json())
       .then(() => {
         setConfigured(false);
         setConnection(null);
         setMissing({ tables: [], views: [], procedures: [], functions: [] });
-        setMessage("Configuration deleted.");
-        setMessageType("success");
+        setMessage('Configuration deleted.');
+        setMessageType('success');
       })
       .catch((e) => {
-        console.error("delete error:", e);
-        setMessage("Could not delete config");
-        setMessageType("error");
+        console.error('delete error:', e);
+        setMessage('Could not delete config');
+        setMessageType('error');
       });
   }
 
@@ -148,22 +148,21 @@ export default function SetupPage() {
   async function handleDeploy() {
     setLoading(true);
     try {
-      const res = await fetch("/api/deploy", { method: "POST" });
+      const res = await fetch('/api/deploy', { method: 'POST' });
       if (!res.ok) {
         const err = await res.text();
         throw new Error(err);
       }
 
-      setMessage("Deployed missing objects.");
-      setMessageType("success");
+      setMessage('Deployed missing objects.');
+      setMessageType('success');
 
       // now re‑fetch your status
-      const status = await fetch("/api/schema-status").then(r => r.json());
+      const status = await fetch('/api/schema-status').then((r) => r.json());
       setMissing(status.missing);
-
     } catch (e) {
       setMessage(e.message);
-      setMessageType("error");
+      setMessageType('error');
     } finally {
       setLoading(false);
     }
@@ -173,30 +172,42 @@ export default function SetupPage() {
   function handleEdit() {
     setConfigured(false);
     setMessage(null);
-    setMessageType("");
+    setMessageType('');
   }
 
   return (
     <div className="setup-container">
       <h1 className="setup-title">Core Database Setup</h1>
-      {message && (
-        <div className={`message ${messageType}`}>{message}</div>
-      )}
+      {message && <div className={`message ${messageType}`}>{message}</div>}
       <div className="cards">
         {/* ─── CONFIGURE CARD ───────────────────────────────────── */}
         <div className="card">
           {configured ? (
             <>
               <h2>Configured Connection</h2>
-              <p><strong>Host:</strong> {connection.db_host}</p>
-              <p><strong>Port:</strong> {connection.db_port}</p>
-              <p><strong>User:</strong> {connection.db_user}</p>
-              <p><strong>Database:</strong> {connection.db_name}</p>
-              <p><strong>Schema:</strong> {connection.schema}</p>
-              <p><strong>Driver:</strong> {connection.odbc_driver}</p>
+              <p>
+                <strong>Host:</strong> {connection.db_host}
+              </p>
+              <p>
+                <strong>Port:</strong> {connection.db_port}
+              </p>
+              <p>
+                <strong>User:</strong> {connection.db_user}
+              </p>
+              <p>
+                <strong>Database:</strong> {connection.db_name}
+              </p>
+              <p>
+                <strong>Schema:</strong> {connection.schema}
+              </p>
+              <p>
+                <strong>Driver:</strong> {connection.odbc_driver}
+              </p>
               <div className="buttons">
                 <button onClick={handleEdit}>Edit</button>
-                <button className="danger" onClick={handleDelete}>Delete</button>
+                <button className="danger" onClick={handleDelete}>
+                  Delete
+                </button>
               </div>
             </>
           ) : (
@@ -269,28 +280,23 @@ export default function SetupPage() {
 
             {/* all deployed */}
             {missing.tables.length === 0 &&
-              missing.views.length === 0 &&
-              missing.procedures.length === 0 &&
-              missing.functions.length === 0 ? (
+            missing.views.length === 0 &&
+            missing.procedures.length === 0 &&
+            missing.functions.length === 0 ? (
               <p>✅ All core schema objects are deployed.</p>
-
             ) : (
               <>
-                {missing.tables.length > 0 && (
-                  <p>Missing tables: {missing.tables.join(", ")}</p>
-                )}
-                {missing.views.length > 0 && (
-                  <p>Missing views: {missing.views.join(", ")}</p>
-                )}
+                {missing.tables.length > 0 && <p>Missing tables: {missing.tables.join(', ')}</p>}
+                {missing.views.length > 0 && <p>Missing views: {missing.views.join(', ')}</p>}
                 {missing.procedures.length > 0 && (
-                  <p>Missing procs: {missing.procedures.join(", ")}</p>
+                  <p>Missing procs: {missing.procedures.join(', ')}</p>
                 )}
                 {missing.functions.length > 0 && (
-                  <p>Missing functions: {missing.functions.join(", ")}</p>
+                  <p>Missing functions: {missing.functions.join(', ')}</p>
                 )}
 
                 <button onClick={handleDeploy} disabled={loading}>
-                  {loading ? "Deploying…" : "Deploy Missing"}
+                  {loading ? 'Deploying…' : 'Deploy Missing'}
                 </button>
               </>
             )}

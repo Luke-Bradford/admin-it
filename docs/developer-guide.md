@@ -85,6 +85,13 @@
     npm run preview   # Preview production build
     ```
 
+4. **Update lint**
+
+    ```bash
+    # lint update - From front end
+    npx prettier --write "src/**/*.{js,jsx,json,css,md}"
+    ```
+
 ---
 
 ## 🛠️ Running Backend and Frontend Together

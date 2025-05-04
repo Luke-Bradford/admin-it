@@ -19,15 +19,15 @@
   border-radius: 4px;
 }
 
-  .message.error {
-    background: #4a1f1f;
-    border: 1px solid #7a2f2f;
-  }
+.message.error {
+  background: #4a1f1f;
+  border: 1px solid #7a2f2f;
+}
 
-  .message.success {
-    background: #1f4a1f;
-    border: 1px solid #2f7a2f;
-  }
+.message.success {
+  background: #1f4a1f;
+  border: 1px solid #2f7a2f;
+}
 
 /* side-by-side cards */
 .cards {
@@ -74,19 +74,19 @@
   gap: 1rem;
 }
 
-  .button-row button {
-    flex: 1;
-    padding: 0.6rem 1.2rem;
-    border: 1px solid #666;
-    border-radius: 4px;
-    background: #333;
-    color: #eee;
-    cursor: pointer;
-  }
+.button-row button {
+  flex: 1;
+  padding: 0.6rem 1.2rem;
+  border: 1px solid #666;
+  border-radius: 4px;
+  background: #333;
+  color: #eee;
+  cursor: pointer;
+}
 
-    .button-row button:hover {
-      background: #444;
-    }
+.button-row button:hover {
+  background: #444;
+}
 
 /* card-level buttons */
 .buttons {
@@ -95,24 +95,24 @@
   margin-top: 1rem;
 }
 
-  .buttons button {
-    flex: 1;
-    padding: 0.5rem;
-    border: none;
-    border-radius: 4px;
-    background: #444;
-    color: #fff;
-    cursor: pointer;
-  }
+.buttons button {
+  flex: 1;
+  padding: 0.5rem;
+  border: none;
+  border-radius: 4px;
+  background: #444;
+  color: #fff;
+  cursor: pointer;
+}
 
-    .buttons button:hover {
-      background: #555;
-    }
+.buttons button:hover {
+  background: #555;
+}
 
-  .buttons .danger {
-    background: #a22;
-  }
+.buttons .danger {
+  background: #a22;
+}
 
-    .buttons .danger:hover {
-      background: #c44;
-    }
+.buttons .danger:hover {
+  background: #c44;
+}

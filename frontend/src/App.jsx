@@ -8,15 +8,17 @@ function HomeLoader() {
 
   useEffect(() => {
     fetch('/api/setup')
-      .then(r => r.json())
-      .then(json => setStatus({ loading: false, configured: json.configured }))
+      .then((r) => r.json())
+      .then((json) => setStatus({ loading: false, configured: json.configured }))
       .catch(() => setStatus({ loading: false, configured: false }));
   }, []);
 
   if (status.loading) return <div>Loading…</div>;
-  return status.configured
-    ? <Navigate to="/manage" replace />      // or "/" or whatever your main UI is
-    : <Navigate to="/setup" replace />;
+  return status.configured ? (
+    <Navigate to="/manage" replace /> // or "/" or whatever your main UI is
+  ) : (
+    <Navigate to="/setup" replace />
+  );
 }
 
 export default function App() {
