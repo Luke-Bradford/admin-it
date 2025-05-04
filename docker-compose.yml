@@ -11,6 +11,8 @@ services:
     environment:
       - ACCEPT_EULA=Y
       - PYTHONUNBUFFERED=1
+    env_file:
+      - ./backend/.env
 
   frontend:
     build:

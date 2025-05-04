@@ -18,4 +18,4 @@ app.add_middleware(
 )
 
 # Include setup API route
-app.include_router(setup_routes.router)
+app.include_router(setup_routes.router, prefix="/api")

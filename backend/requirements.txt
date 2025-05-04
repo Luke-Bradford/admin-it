@@ -1,6 +1,7 @@
 fastapi==0.100.0
-uvicorn==0.22.0
+uvicorn[standard]==0.22.0
 pydantic<2.0.0
 python-dotenv
 pyodbc
+sqlalchemy>=2.0.0,<3.0.0
 cryptography>=41.0.0
