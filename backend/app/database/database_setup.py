@@ -1,85 +1,45 @@
 # backend/app/database/database_setup.py
-import pyodbc
+import logging
 
-class DatabaseSetup:
-    def __init__(self, conn_str, schema="adm"):
-        self.conn_str = conn_str
-        self.schema = schema
-        self.conn = None
+from sqlalchemy import inspect
+from sqlalchemy.exc import SQLAlchemyError
 
-    def connect(self):
-        """Establish connection to the database."""
-        self.conn = pyodbc.connect(self.conn_str)
-        print(f"Connected to database.")
+from app.db import DatabaseConfig, get_engine, test_connection
+# Replace the following import with your actual Base metadata
+from app.models import Base  
 
-    def ensure_schema_exists(self):
-        """Create schema if it does not exist."""
-        cursor = self.conn.cursor()
 
-        check_schema_sql = f"""
-        IF NOT EXISTS (SELECT * FROM sys.schemas WHERE name = '{self.schema}')
-        BEGIN
-            EXEC('CREATE SCHEMA {self.schema}')
-        END
-        """
+def init_core_database():
+    """
+    Initialize the core database schema if it doesn't exist.
+    """
+    config = DatabaseConfig()
+    if not config.is_complete():
+        raise RuntimeError("Incomplete database configuration. Check environment variables.")
 
-        cursor.execute(check_schema_sql)
-        self.conn.commit()
-        print(f"Schema '{self.schema}' verified or created.")
+    try:
+        engine = get_engine(config)
+    except RuntimeError as e:
+        logging.error(f"Failed to create engine: {e}")
+        raise
 
-    def create_connections_table(self):
-        """Create the Connections table inside the schema."""
-        cursor = self.conn.cursor()
+    if not test_connection(engine):
+        raise RuntimeError("Cannot connect to core database. Verify credentials and network connectivity.")
 
-        create_table_sql = f"""
-        IF NOT EXISTS (
-            SELECT * 
-            FROM INFORMATION_SCHEMA.TABLES 
-            WHERE TABLE_SCHEMA = '{self.schema}' 
-              AND TABLE_NAME = 'Connections'
-        )
-        BEGIN
-            CREATE TABLE [{self.schema}].[Connections] (
-                Id INT IDENTITY(1,1) PRIMARY KEY,
-                Name NVARCHAR(255) NOT NULL,
-                DbType NVARCHAR(50) NOT NULL,
-                EncryptedHost NVARCHAR(MAX) NOT NULL,
-                EncryptedPort NVARCHAR(MAX) NOT NULL,
-                EncryptedUsername NVARCHAR(MAX) NOT NULL,
-                EncryptedPassword NVARCHAR(MAX) NOT NULL,
-                EncryptedDbName NVARCHAR(MAX) NOT NULL,
-                CreatedAt DATETIME2 DEFAULT SYSUTCDATETIME(),
-                ModifiedAt DATETIME2 DEFAULT SYSUTCDATETIME()
-            )
-        END
-        """
+    inspector = inspect(engine)
+    # Check for an example core table; replace 'core_meta' with your table name
+    if not inspector.has_table('core_meta'):
+        logging.info("Core database tables not found; creating schema...")
+        Base.metadata.create_all(bind=engine)
+        logging.info("Core database schema initialized successfully.")
+    else:
+        logging.info("Core database already initialized; skipping creation.")
 
-        cursor.execute(create_table_sql)
-        self.conn.commit()
-        print(f"Table '{self.schema}.Connections' verified or created.")
 
-    def close(self):
-        """Close the database connection."""
-        if self.conn:
-            self.conn.close()
-            print("Database connection closed.")
-
-    def run_setup(self):
-        """Full setup sequence."""
-        self.connect()
-        self.ensure_schema_exists()
-        self.create_connections_table()
-        self.close()
-
-if __name__ == "__main__":
-    # Example usage
-    connection_string = (
-        "DRIVER={ODBC Driver 17 for SQL Server};"
-        "SERVER=sqlserver,1433;"
-        "DATABASE=master;"
-        "UID=sa;"
-        "PWD=YourStrong!Passw0rd"
-    )
-
-    setup = DatabaseSetup(conn_str=connection_string, schema="adm")
-    setup.run_setup()
+if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO)
+    try:
+        init_core_database()
+    except Exception as e:
+        logging.error(f"Database setup failed: {e}")
+        raise
