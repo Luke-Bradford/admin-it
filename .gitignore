@@ -15,4 +15,3 @@ __pycache__/
 .DS_Store
 .env
 /backend/core_connection.enc
-/backend/core_connection.enc
