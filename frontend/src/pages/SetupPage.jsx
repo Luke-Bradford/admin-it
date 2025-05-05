@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import './SetupPage.css';
 
 export default function SetupPage() {
@@ -28,6 +29,8 @@ export default function SetupPage() {
   const [adminUsername, setAdminUsername] = useState('');
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
+
+  const navigate = useNavigate();
 
   // ─────────────────────────────────────────────────────────────
   // Fetch existing setup on mount
@@ -438,6 +441,15 @@ export default function SetupPage() {
             ) : (
               <p className="success-text">SystemAdmin user already exists.</p>
             )}
+          </div>
+        )}
+
+        {/* Once admin exists, show a button to go to login */}
+        {configured && schemaDeployed && adminCreated && (
+          <div className="button-row">
+            <button className="proceed-button" onClick={() => navigate('/login')}>
+              Proceed to Login
+            </button>
           </div>
         )}
       </div>

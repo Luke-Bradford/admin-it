@@ -131,6 +131,25 @@ CREATE TABLE [' + @SchemaName + '].[UserConnectionAccess] (
 ';
 
 -----------------------------------------
+-- SECRETS
+-----------------------------------------
+SET @sql += '
+CREATE TABLE [' + @SchemaName + '].[Secrets] (
+    SecretId UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+    SecretType VARCHAR(100) NOT NULL,
+    SecretDescription VARCHAR(255) NULL,
+    SecretValue VARCHAR(MAX) NOT NULL,
+    CreatedById UNIQUEIDENTIFIER,
+    CreatedDate DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+    ModifiedById UNIQUEIDENTIFIER,
+    ModifiedDate DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+    ValidFrom DATETIME2 GENERATED ALWAYS AS ROW START HIDDEN NOT NULL,
+    ValidTo DATETIME2 GENERATED ALWAYS AS ROW END HIDDEN NOT NULL,
+    PERIOD FOR SYSTEM_TIME (ValidFrom, ValidTo)
+) WITH (SYSTEM_VERSIONING = ON (HISTORY_TABLE = [' + @SchemaName + '].[SecretsHistory]));
+';
+
+-----------------------------------------
 -- Seed Data for Roles and Permissions
 -----------------------------------------
 SET @sql += '
@@ -143,6 +162,10 @@ IF NOT EXISTS (SELECT 1 FROM [' + @SchemaName + '].[ConnectionPermissions])
         INSERT INTO [' + @SchemaName + '].[ConnectionPermissions] (PermissionId, PermissionName)
         VALUES (NEWID(), ''Read''), (NEWID(), ''Write''), (NEWID(), ''Admin'');
     END
+
+IF NOT EXISTS (SELECT NULL FROM [' + @SchemaName + '].[Secrets] WHERE SecretType = ''JWT_SECRET'')
+    INSERT INTO [' + @SchemaName + '].[Secrets] (SecretId, SecretType, SecretDescription, SecretValue)
+    VALUES (NEWID(), ''JWT_SECRET'', ''Used to sign JWT tokens'', CONCAT('''', CONVERT(VARCHAR(MAX), CONVERT(VARBINARY(MAX), CRYPT_GEN_RANDOM(32)), 2)));
 ';
 
 -- Execute the constructed SQL
