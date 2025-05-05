@@ -29,10 +29,7 @@ function LoginPage() {
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100">
-      <form
-        onSubmit={handleLogin}
-        className="bg-white p-6 rounded shadow-md w-full max-w-sm"
-      >
+      <form onSubmit={handleLogin} className="bg-white p-6 rounded shadow-md w-full max-w-sm">
         <h2 className="text-xl font-bold mb-4">Login</h2>
         {error && <p className="text-red-500 text-sm mb-2">{error}</p>}
         <div className="mb-4">
