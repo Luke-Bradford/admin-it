@@ -20,10 +20,12 @@ function LoginPage() {
     if (res.ok) {
       const { token } = await res.json();
       localStorage.setItem('token', token);
-      navigate('/manage');
-    } else {
-      const err = await res.json();
-      setError(err.detail || 'Login failed');
+
+      // Decode and store user info
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      localStorage.setItem('user', JSON.stringify(payload));
+
+      navigate('/dashboard');
     }
   };
 

@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './SetupPage.css';
 
 export default function SetupPage() {
-  // ─────────────────────────────────────────────────────────────
-  // State
+  const navigate = useNavigate();
+  const [checkedSetup, setCheckedSetup] = useState(false);
+
   const [host, setHost] = useState('');
   const [useLocalhostAlias, setUseLocalhostAlias] = useState(false);
   const [port, setPort] = useState(1433);
@@ -30,32 +31,22 @@ export default function SetupPage() {
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
 
-  const navigate = useNavigate();
+  const redirectToLogin = useCallback(() => {
+    navigate('/login', { replace: true });
+  }, [navigate]);
 
-  // ─────────────────────────────────────────────────────────────
-  // Fetch existing setup on mount
-  useEffect(() => {
-    fetch('/api/setup')
+  const redirectToDashboard = useCallback(() => {
+    navigate('/dashboard', { replace: true });
+  }, [navigate]);
+
+  const checkAdminStatus = useCallback(() => {
+    fetch('/api/setup/admin-status')
       .then((r) => r.json())
-      .then((data) => {
-        if (data.configured) {
-          setConfigured(true);
-          setConnection(data.connection);
-          const d = data.connection;
-          setHost(d.db_host);
-          setPort(d.db_port);
-          setUser(d.db_user);
-          setPassword('');
-          setDatabase(d.db_name);
-          setSchema(d.schema);
-          setDriver(d.odbc_driver);
-          checkDeployStatus();
-        }
-      })
-      .catch(() => {});
+      .then((d) => setAdminCreated(d.present))
+      .catch(() => setAdminCreated(false));
   }, []);
 
-  function checkDeployStatus() {
+  const checkDeployStatus = useCallback(() => {
     fetch('/api/setup/deploy-status')
       .then((r) => r.json())
       .then((d) => {
@@ -63,14 +54,52 @@ export default function SetupPage() {
         if (d.deployed) checkAdminStatus();
       })
       .catch(() => setSchemaDeployed(false));
-  }
+  }, [checkAdminStatus]);
 
-  function checkAdminStatus() {
-    fetch('/api/setup/admin-status')
+  useEffect(() => {
+    fetch('/api/setup')
       .then((r) => r.json())
-      .then((d) => setAdminCreated(d.present))
-      .catch(() => setAdminCreated(false));
-  }
+      .then((data) => {
+        if (!data.configured) {
+          setCheckedSetup(true);
+          return;
+        }
+
+        setConfigured(true);
+        setConnection(data.connection);
+        const d = data.connection;
+        setHost(d.db_host);
+        setPort(d.db_port);
+        setUser(d.db_user);
+        setPassword('');
+        setDatabase(d.db_name);
+        setSchema(d.schema);
+        setDriver(d.odbc_driver);
+        checkDeployStatus();
+
+        const token = localStorage.getItem('token');
+        if (!token) {
+          redirectToLogin();
+          return;
+        }
+
+        try {
+          const payload = JSON.parse(atob(token.split('.')[1]));
+          const roles = payload.roles || [];
+
+          if (roles.includes('SystemAdmin')) {
+            setCheckedSetup(true);
+          } else {
+            redirectToDashboard();
+          }
+        } catch {
+          redirectToLogin();
+        }
+      })
+      .catch(() => {
+        setCheckedSetup(true);
+      });
+  }, [checkDeployStatus, redirectToLogin, redirectToDashboard]);
 
   // ─────────────────────────────────────────────────────────────
   // Handlers for editing DB connection
@@ -237,6 +266,9 @@ export default function SetupPage() {
 
   // ─────────────────────────────────────────────────────────────
   // Render
+
+  if (!checkedSetup) return <div className="setup-container">Checking setup status…</div>;
+
   return (
     <div className="setup-container">
       <h1 className="setup-title">Core Database Setup</h1>
@@ -445,7 +477,7 @@ export default function SetupPage() {
         )}
 
         {/* Once admin exists, show a button to go to login */}
-        {configured && schemaDeployed && adminCreated && (
+        {configured && schemaDeployed && adminCreated && !localStorage.getItem('token') && (
           <div className="button-row">
             <button className="proceed-button" onClick={() => navigate('/login')}>
               Proceed to Login
