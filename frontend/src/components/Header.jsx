@@ -5,7 +5,7 @@ import './Header.css';
 
 export default function Header() {
   const navigate = useNavigate();
-  const token = localStorage.getItem("token");
+  const token = localStorage.getItem('token');
   let username = null;
 
   try {
@@ -15,13 +15,13 @@ export default function Header() {
     }
   } catch {
     // If token is corrupted, force logout
-    localStorage.removeItem("token");
-    navigate("/login");
+    localStorage.removeItem('token');
+    navigate('/login');
   }
 
   const handleLogout = () => {
-    localStorage.removeItem("token");
-    navigate("/login");
+    localStorage.removeItem('token');
+    navigate('/login');
   };
 
   return (
@@ -30,7 +30,9 @@ export default function Header() {
       {username && (
         <div className="header-user">
           <span className="header-username">{username}</span>
-          <button className="logout-button" onClick={handleLogout}>Logout</button>
+          <button className="logout-button" onClick={handleLogout}>
+            Logout
+          </button>
         </div>
       )}
     </header>

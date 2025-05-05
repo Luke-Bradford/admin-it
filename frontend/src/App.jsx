@@ -3,15 +3,13 @@ import React, { useState, useEffect, createContext } from 'react';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import SetupPage from './pages/SetupPage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
-import RequireAuth from "./components/RequireAuth";
+import RequireAuth from './components/RequireAuth';
 import Dashboard from './pages/Dashboard';
-import Layout from "./components/Layout";
+import Layout from './components/Layout';
 import ProtectedSetupRoute from './components/ProtectedSetupRoute';
 
 // Create a context to share user info across the app
 export const UserContext = createContext(null);
-
-
 
 function HomeLoader() {
   const [status, setStatus] = useState({ loading: true });
@@ -35,19 +33,19 @@ export default function App() {
   const [user, setUser] = useState(null);
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
+    const token = localStorage.getItem('token');
     if (!token) return;
 
     fetch('/api/auth/me', {
-      headers: { Authorization: `Bearer ${token}` }
+      headers: { Authorization: `Bearer ${token}` },
     })
-      .then(res => {
+      .then((res) => {
         if (!res.ok) throw new Error();
         return res.json();
       })
-      .then(data => setUser(data))
+      .then((data) => setUser(data))
       .catch(() => {
-        localStorage.removeItem("token");
+        localStorage.removeItem('token');
         setUser(null);
       });
   }, []);
@@ -55,21 +53,27 @@ export default function App() {
     <UserContext.Provider value={user}>
       <Routes>
         <Route path="/" element={<HomeLoader />} />
-        <Route path="/setup" element={
-          <ProtectedSetupRoute>
-            <Layout>
-              <SetupPage />
-            </Layout>
-          </ProtectedSetupRoute>
-        } />
+        <Route
+          path="/setup"
+          element={
+            <ProtectedSetupRoute>
+              <Layout>
+                <SetupPage />
+              </Layout>
+            </ProtectedSetupRoute>
+          }
+        />
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/dashboard" element={
-          <RequireAuth>
-            <Layout>
-              <Dashboard />
-            </Layout>
-          </RequireAuth>
-        } />
+        <Route
+          path="/dashboard"
+          element={
+            <RequireAuth>
+              <Layout>
+                <Dashboard />
+              </Layout>
+            </RequireAuth>
+          }
+        />
         <Route path="*" element={<HomeLoader />} />
       </Routes>
     </UserContext.Provider>

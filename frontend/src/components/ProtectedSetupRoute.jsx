@@ -1,6 +1,6 @@
 // src/components/ProtectedSetupRoute.jsx
-import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 export default function ProtectedSetupRoute({ children }) {
   const [allowed, setAllowed] = useState(false);
@@ -8,9 +8,9 @@ export default function ProtectedSetupRoute({ children }) {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
+    const token = localStorage.getItem('token');
 
-    fetch("/api/setup")
+    fetch('/api/setup')
       .then((r) => r.json())
       .then((data) => {
         const setupComplete = data.configured;
@@ -19,30 +19,30 @@ export default function ProtectedSetupRoute({ children }) {
           setAllowed(true);
         } else if (token) {
           // Call backend instead of decoding JWT directly
-          fetch("/api/auth/me", {
-            headers: { Authorization: `Bearer ${token}` }
+          fetch('/api/auth/me', {
+            headers: { Authorization: `Bearer ${token}` },
           })
             .then((res) => {
-              if (!res.ok) throw new Error("Unauthorized");
+              if (!res.ok) throw new Error('Unauthorized');
               return res.json();
             })
             .then((user) => {
-              if (user.roles.includes("SystemAdmin")) {
+              if (user.roles.includes('SystemAdmin')) {
                 setAllowed(true);
               } else {
-                navigate("/dashboard", { replace: true });
+                navigate('/dashboard', { replace: true });
               }
             })
             .catch(() => {
-              localStorage.removeItem("token");
-              localStorage.removeItem("user");
-              navigate("/login", { replace: true });
+              localStorage.removeItem('token');
+              localStorage.removeItem('user');
+              navigate('/login', { replace: true });
             });
         } else {
-          navigate("/login", { replace: true });
+          navigate('/login', { replace: true });
         }
       })
-      .catch(() => navigate("/login", { replace: true }))
+      .catch(() => navigate('/login', { replace: true }))
       .finally(() => setChecked(true));
   }, []);
 

@@ -1,5 +1,5 @@
 // src/pages/Dashboard.jsx
-import React from "react";
+import React from 'react';
 
 export default function Dashboard() {
   return (
@@ -25,7 +25,8 @@ export default function Dashboard() {
 
       <div className="mt-8 p-4 bg-white rounded shadow">
         <p className="text-sm text-gray-500">
-          Logged in as <strong>{localStorage.getItem("token") ? "Authenticated User" : "Guest"}</strong>
+          Logged in as{' '}
+          <strong>{localStorage.getItem('token') ? 'Authenticated User' : 'Guest'}</strong>
         </p>
       </div>
     </div>

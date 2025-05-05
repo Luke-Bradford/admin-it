@@ -476,7 +476,7 @@ export default function SetupPage() {
         )}
 
         {/* Once admin exists, show a button to go to login */}
-        {configured && schemaDeployed && adminCreated && !localStorage.getItem("token") && (
+        {configured && schemaDeployed && adminCreated && !localStorage.getItem('token') && (
           <div className="button-row">
             <button className="proceed-button" onClick={() => navigate('/login')}>
               Proceed to Login
