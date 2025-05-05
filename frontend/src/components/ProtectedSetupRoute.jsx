@@ -44,7 +44,7 @@ export default function ProtectedSetupRoute({ children }) {
       })
       .catch(() => navigate('/login', { replace: true }))
       .finally(() => setChecked(true));
-  }, []);
+  }, [navigate]);
 
   if (!checked) return <div>Checking permissions…</div>;
 

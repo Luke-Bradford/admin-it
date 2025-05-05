@@ -1,15 +1,13 @@
 // src/App.jsx
-import React, { useState, useEffect, createContext } from 'react';
-import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { UserContext } from './context/UserContext';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import SetupPage from './pages/SetupPage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import RequireAuth from './components/RequireAuth';
 import Dashboard from './pages/Dashboard';
 import Layout from './components/Layout';
 import ProtectedSetupRoute from './components/ProtectedSetupRoute';
-
-// Create a context to share user info across the app
-export const UserContext = createContext(null);
 
 function HomeLoader() {
   const [status, setStatus] = useState({ loading: true });

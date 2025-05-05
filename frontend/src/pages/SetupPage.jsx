@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './SetupPage.css';
 
@@ -31,17 +31,40 @@ export default function SetupPage() {
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
 
+  const redirectToLogin = useCallback(() => {
+    navigate('/login', { replace: true });
+  }, [navigate]);
+
+  const redirectToDashboard = useCallback(() => {
+    navigate('/dashboard', { replace: true });
+  }, [navigate]);
+
+  const checkAdminStatus = useCallback(() => {
+    fetch('/api/setup/admin-status')
+      .then((r) => r.json())
+      .then((d) => setAdminCreated(d.present))
+      .catch(() => setAdminCreated(false));
+  }, []);
+
+  const checkDeployStatus = useCallback(() => {
+    fetch('/api/setup/deploy-status')
+      .then((r) => r.json())
+      .then((d) => {
+        setSchemaDeployed(d.deployed);
+        if (d.deployed) checkAdminStatus();
+      })
+      .catch(() => setSchemaDeployed(false));
+  }, [checkAdminStatus]);
+
   useEffect(() => {
     fetch('/api/setup')
       .then((r) => r.json())
       .then((data) => {
         if (!data.configured) {
-          // Setup not complete — allow anyone to configure
           setCheckedSetup(true);
           return;
         }
 
-        // Setup is complete — must be SystemAdmin to continue
         setConfigured(true);
         setConnection(data.connection);
         const d = data.connection;
@@ -56,8 +79,7 @@ export default function SetupPage() {
 
         const token = localStorage.getItem('token');
         if (!token) {
-          // Not logged in
-          navigate('/login', { replace: true });
+          redirectToLogin();
           return;
         }
 
@@ -66,39 +88,18 @@ export default function SetupPage() {
           const roles = payload.roles || [];
 
           if (roles.includes('SystemAdmin')) {
-            // SystemAdmin — allow
             setCheckedSetup(true);
           } else {
-            // Not SystemAdmin — redirect
-            navigate('/dashboard', { replace: true });
+            redirectToDashboard();
           }
         } catch {
-          // Invalid token — redirect to login
-          navigate('/login', { replace: true });
+          redirectToLogin();
         }
       })
       .catch(() => {
-        // Network or parse error — still allow render (could show fallback UI)
         setCheckedSetup(true);
       });
-  }, []);
-
-  function checkDeployStatus() {
-    fetch('/api/setup/deploy-status')
-      .then((r) => r.json())
-      .then((d) => {
-        setSchemaDeployed(d.deployed);
-        if (d.deployed) checkAdminStatus();
-      })
-      .catch(() => setSchemaDeployed(false));
-  }
-
-  function checkAdminStatus() {
-    fetch('/api/setup/admin-status')
-      .then((r) => r.json())
-      .then((d) => setAdminCreated(d.present))
-      .catch(() => setAdminCreated(false));
-  }
+  }, [checkDeployStatus, redirectToLogin, redirectToDashboard]);
 
   // ─────────────────────────────────────────────────────────────
   // Handlers for editing DB connection
