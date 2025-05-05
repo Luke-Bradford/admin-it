@@ -3,8 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import './SetupPage.css';
 
 export default function SetupPage() {
-  // ─────────────────────────────────────────────────────────────
-  // State
+  const navigate = useNavigate();
+  const [checkedSetup, setCheckedSetup] = useState(false);
+
   const [host, setHost] = useState('');
   const [useLocalhostAlias, setUseLocalhostAlias] = useState(false);
   const [port, setPort] = useState(1433);
@@ -30,29 +31,56 @@ export default function SetupPage() {
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
 
-  const navigate = useNavigate();
-
-  // ─────────────────────────────────────────────────────────────
-  // Fetch existing setup on mount
   useEffect(() => {
     fetch('/api/setup')
       .then((r) => r.json())
       .then((data) => {
-        if (data.configured) {
-          setConfigured(true);
-          setConnection(data.connection);
-          const d = data.connection;
-          setHost(d.db_host);
-          setPort(d.db_port);
-          setUser(d.db_user);
-          setPassword('');
-          setDatabase(d.db_name);
-          setSchema(d.schema);
-          setDriver(d.odbc_driver);
-          checkDeployStatus();
+        if (!data.configured) {
+          // Setup not complete — allow anyone to configure
+          setCheckedSetup(true);
+          return;
+        }
+
+        // Setup is complete — must be SystemAdmin to continue
+        setConfigured(true);
+        setConnection(data.connection);
+        const d = data.connection;
+        setHost(d.db_host);
+        setPort(d.db_port);
+        setUser(d.db_user);
+        setPassword('');
+        setDatabase(d.db_name);
+        setSchema(d.schema);
+        setDriver(d.odbc_driver);
+        checkDeployStatus();
+
+        const token = localStorage.getItem('token');
+        if (!token) {
+          // Not logged in
+          navigate('/login', { replace: true });
+          return;
+        }
+
+        try {
+          const payload = JSON.parse(atob(token.split('.')[1]));
+          const roles = payload.roles || [];
+
+          if (roles.includes('SystemAdmin')) {
+            // SystemAdmin — allow
+            setCheckedSetup(true);
+          } else {
+            // Not SystemAdmin — redirect
+            navigate('/dashboard', { replace: true });
+          }
+        } catch {
+          // Invalid token — redirect to login
+          navigate('/login', { replace: true });
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        // Network or parse error — still allow render (could show fallback UI)
+        setCheckedSetup(true);
+      });
   }, []);
 
   function checkDeployStatus() {
@@ -237,6 +265,9 @@ export default function SetupPage() {
 
   // ─────────────────────────────────────────────────────────────
   // Render
+
+  if (!checkedSetup) return <div className="setup-container">Checking setup status…</div>;
+
   return (
     <div className="setup-container">
       <h1 className="setup-title">Core Database Setup</h1>
@@ -445,7 +476,7 @@ export default function SetupPage() {
         )}
 
         {/* Once admin exists, show a button to go to login */}
-        {configured && schemaDeployed && adminCreated && (
+        {configured && schemaDeployed && adminCreated && !localStorage.getItem("token") && (
           <div className="button-row">
             <button className="proceed-button" onClick={() => navigate('/login')}>
               Proceed to Login

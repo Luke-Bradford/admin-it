@@ -8,6 +8,10 @@ from app.routes.auth_routes import router as auth_router
 from app import settings
 from app.db import DatabaseConfig, get_engine, fetch_secret
 from app.utils.db_helpers import get_config_and_engine
+from app.routes.manage_routes import router as manage_router
+from app.utils.secure_config import core_config_exists
+from app.database.database_setup import is_core_schema_deployed
+
 
 app = FastAPI()
 
@@ -41,3 +45,16 @@ app.add_middleware(
 app.include_router(setup_router, prefix="/api/setup", tags=["Setup"])
 app.include_router(discovery_router, prefix="/api/discover", tags=["Discovery"])
 app.include_router(auth_router, prefix="/api/auth", tags=["Auth"])
+# Conditionally include protected routes
+try:
+    if core_config_exists():
+        config, engine = get_config_and_engine()
+        if is_core_schema_deployed(engine, schema=config.schema):
+            app.include_router(manage_router, prefix="/api/manage", tags=["Manage"])
+            print("[startup] Protected routes registered.")
+        else:
+            print("[startup] Core schema not deployed. Skipping protected routes.")
+    else:
+        print("[startup] No config file. Skipping protected routes.")
+except Exception as e:
+    print(f"[startup] Error loading protected routes: {e}")
