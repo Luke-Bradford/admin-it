@@ -15,7 +15,8 @@ SQL_FILE_PATH = os.path.join(os.path.dirname(__file__), '../sql/spDeployCoreSche
 def is_core_schema_deployed(engine: Engine, schema: str = 'adm') -> bool:
     expected_tables = [
         "Users", "UserSecrets", "Roles", "UserRoles",
-        "Connections", "ConnectionPermissions", "UserConnectionAccess"
+        "Connections", "ConnectionPermissions", "UserConnectionAccess",
+        "Secrets"
     ]
 
     try:

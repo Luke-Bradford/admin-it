@@ -66,7 +66,6 @@ class AdminUserInput(BaseModel):
 @router.post("/test-connection")
 async def test_connection(details: ConnDetails):
     # Resolve host — especially for Docker environments using host.docker.internal
-    # resolved_host = resolve_hostname(details.db_host, use_docker_alias=details.use_localhost_alias)
     resolved_host = resolve_hostname(details.db_host, use_localhost_alias=details.use_localhost_alias)
     print(f"[test-connection] Using resolved host: {resolved_host}")
 
