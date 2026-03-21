@@ -2,22 +2,24 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes.setup_routes import router as setup_router
-from app.routes.discovery_routes import router as discovery_router
-from app.routes.auth_routes import router as auth_router
-from app import settings
-from app.db import DatabaseConfig, get_engine, fetch_secret
-from app.utils.db_helpers import get_config_and_engine
-from app.routes.manage_routes import router as manage_router
-from app.utils.secure_config import core_config_exists
-from app.database.database_setup import is_core_schema_deployed
 
+from app import settings
+from app.database.database_setup import is_core_schema_deployed
+from app.db import fetch_secret
+from app.routes.auth_routes import router as auth_router
+from app.routes.discovery_routes import router as discovery_router
+from app.routes.manage_routes import router as manage_router
+from app.routes.setup_routes import router as setup_router
+from app.utils.db_helpers import get_config_and_engine
+from app.utils.secure_config import core_config_exists
 
 app = FastAPI()
+
 
 @app.get("/ping")
 def ping():
     return {"message": "pong"}
+
 
 @app.on_event("startup")
 def load_jwt_secret():
@@ -31,6 +33,7 @@ def load_jwt_secret():
     except Exception as e:
         print(f"[startup] Failed to load JWT secret: {e}")
         raise e  # Let FastAPI crash early if critical setup fails
+
 
 # CORS setup
 app.add_middleware(

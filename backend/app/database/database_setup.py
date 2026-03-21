@@ -1,22 +1,24 @@
 import logging
 import os
-
-from sqlalchemy import text, inspect
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.engine import Engine
-
-from app.db import DatabaseConfig, get_engine, test_connection
-from app.utils.secure_config import load_core_config
 import traceback
 
-SQL_FILE_PATH = os.path.join(os.path.dirname(__file__), '../sql/spDeployCoreSchema.sql')
+from sqlalchemy import inspect, text
+from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
+
+SQL_FILE_PATH = os.path.join(os.path.dirname(__file__), "../sql/spDeployCoreSchema.sql")
 
 
-def is_core_schema_deployed(engine: Engine, schema: str = 'adm') -> bool:
+def is_core_schema_deployed(engine: Engine, schema: str = "adm") -> bool:
     expected_tables = [
-        "Users", "UserSecrets", "Roles", "UserRoles",
-        "Connections", "ConnectionPermissions", "UserConnectionAccess",
-        "Secrets"
+        "Users",
+        "UserSecrets",
+        "Roles",
+        "UserRoles",
+        "Connections",
+        "ConnectionPermissions",
+        "UserConnectionAccess",
+        "Secrets",
     ]
 
     try:
@@ -34,16 +36,18 @@ def is_core_schema_deployed(engine: Engine, schema: str = 'adm') -> bool:
         return False
 
 
-def deploy_core_schema(engine: Engine, schema: str = 'adm') -> None:
+def deploy_core_schema(engine: Engine, schema: str = "adm") -> None:
     """
     Deploys the core schema by loading and executing the schema deployment SQL script.
     """
     try:
-        with open(SQL_FILE_PATH, 'r', encoding='utf-8') as file:
+        with open(SQL_FILE_PATH, "r", encoding="utf-8") as file:
             sql_script = file.read()
 
-        # Inject schema parameter by simple replacement (safe since it's controlled input)
-        sql_script = sql_script.replace("DECLARE @SchemaName NVARCHAR(100) = 'changeme';", f"DECLARE @SchemaName NVARCHAR(100) = '{schema}';")
+        # Inject schema name by simple replacement (safe: schema comes from encrypted config, not user input)
+        placeholder = "DECLARE @SchemaName NVARCHAR(100) = 'changeme';"
+        replacement = f"DECLARE @SchemaName NVARCHAR(100) = '{schema}';"
+        sql_script = sql_script.replace(placeholder, replacement)
 
         with engine.begin() as conn:
             conn.execute(text(sql_script))

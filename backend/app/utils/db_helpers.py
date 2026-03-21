@@ -1,18 +1,15 @@
 # app/utils/db_helpers.py
 
-from app.utils.secure_config import load_core_config
 from app.db import DatabaseConfig, get_engine
 from app.utils.host_resolver import resolve_hostname
+from app.utils.secure_config import load_core_config
+
 
 def get_config_and_engine():
     core = load_core_config()
-    use_docker_alias = core.get("use_localhost_alias", False)
 
     # Resolve hostname only at runtime, leave saved config untouched
-    resolved_host = resolve_hostname(
-        core["db_host"],
-        use_localhost_alias=core.get("use_localhost_alias", False)
-    )
+    resolved_host = resolve_hostname(core["db_host"], use_localhost_alias=core.get("use_localhost_alias", False))
 
     config = DatabaseConfig(
         server=resolved_host,

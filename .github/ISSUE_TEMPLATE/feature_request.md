@@ -1,30 +1,36 @@
-﻿---
+---
 name: Feature Request
-about: Suggest a new feature or improvement for Admin-IT
+about: Propose a new feature or improvement
 title: "[Feature]: "
 labels: enhancement
 assignees: ''
-
 ---
 
-## 🚀 Feature Description
+## Problem / user need
 
-<!-- A clear and concise description of the feature you want to propose. -->
+<!-- Who is this for and what can they not do today? Frame it from the user's perspective,
+     not the implementation. E.g. "A non-technical user cannot tell which queries a connection
+     has run without asking a developer." -->
 
----
+## Proposed solution
 
-## 📋 Justification
+<!-- What should the product do? Describe behaviour, not implementation. -->
 
-<!-- Why should this feature be added? How would it benefit users or developers? -->
+## Who benefits
 
----
+<!-- Circle the primary audience: End user (non-technical) / Power user / Engineer / Admin -->
 
-## 🛠️ Implementation Ideas (optional)
+## Acceptance criteria
 
-<!-- If you have ideas about how this could be implemented, share them! -->
+<!-- How do we know when this is done? List observable outcomes. -->
 
----
+- [ ]
+- [ ]
 
-## 📚 Additional Context
+## Out of scope
 
-<!-- Add any other relevant details, mockups, diagrams, references, etc. -->
+<!-- What related things are explicitly NOT part of this request? -->
+
+## Additional context
+
+<!-- Mockups, references, related issues. -->

@@ -1,8 +1,9 @@
 # app/utils/discovery.py
 
 import socket
-import pyodbc
 from typing import List
+
+import pyodbc
 
 
 def test_tcp_connection(host: str, port: int, timeout: float = 2.0) -> bool:
@@ -16,15 +17,14 @@ def test_tcp_connection(host: str, port: int, timeout: float = 2.0) -> bool:
         return False
 
 
-def get_databases(host: str, port: int, user: str, password: str, driver: str = "ODBC Driver 18 for SQL Server") -> List[str]:
+def get_databases(
+    host: str, port: int, user: str, password: str, driver: str = "ODBC Driver 18 for SQL Server"
+) -> List[str]:
     """
     Returns a list of databases accessible with the provided credentials.
     """
     conn_str = (
-        f"DRIVER={{{driver}}};"
-        f"SERVER={host},{port};"
-        f"UID={user};PWD={password};"
-        f"Encrypt=yes;TrustServerCertificate=yes"
+        f"DRIVER={{{driver}}};SERVER={host},{port};UID={user};PWD={password};Encrypt=yes;TrustServerCertificate=yes"
     )
     try:
         conn = pyodbc.connect(conn_str, timeout=3)

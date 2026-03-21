@@ -2,47 +2,50 @@
 
 import os
 from urllib.parse import quote_plus
-from sqlalchemy import create_engine, MetaData
-from sqlalchemy.exc import SQLAlchemyError
+
+from sqlalchemy import MetaData, create_engine
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.sql import text
+
 
 class DatabaseConfig:
     """
     Load database configuration from environment variables or dynamic settings.
     If you pass any of the parameters, those will override the corresponding env var.
     """
+
     def __init__(
         self,
-        server: str        = None,
-        port: int          = None,
-        user: str          = None,
-        password: str      = None,
-        database: str      = None,
-        odbc_driver: str   = None,
-        schema: str        = None,
+        server: str = None,
+        port: int = None,
+        user: str = None,
+        password: str = None,
+        database: str = None,
+        odbc_driver: str = None,
+        schema: str = None,
     ):
         # dynamic overrides take precedence, otherwise fall back to env
-        self.server   = server   or os.getenv("MSSQL_SERVER")
+        self.server = server or os.getenv("MSSQL_SERVER")
         # default to 1433 if neither passed nor in env
-        self.port     = port     or int(os.getenv("MSSQL_PORT", "1433"))
-        self.user     = user     or os.getenv("MSSQL_USER")
+        self.port = port or int(os.getenv("MSSQL_PORT", "1433"))
+        self.user = user or os.getenv("MSSQL_USER")
         self.password = password or os.getenv("MSSQL_PASSWORD")
         self.database = database or os.getenv("MSSQL_DATABASE")
-        self.driver   = odbc_driver or os.getenv(
-            "MSSQL_DRIVER", "ODBC Driver 17 for SQL Server"
-        )
-        self.schema   = schema   or os.getenv("MSSQL_SCHEMA", "adm")
+        self.driver = odbc_driver or os.getenv("MSSQL_DRIVER", "ODBC Driver 17 for SQL Server")
+        self.schema = schema or os.getenv("MSSQL_SCHEMA", "adm")
 
     def is_complete(self) -> bool:
-        return all([
-            self.server,
-            self.port,
-            self.user,
-            self.password,
-            self.database,
-        ])
+        return all(
+            [
+                self.server,
+                self.port,
+                self.user,
+                self.password,
+                self.database,
+            ]
+        )
 
     def connection_string(self) -> str:
         """
@@ -50,7 +53,7 @@ class DatabaseConfig:
         for ODBC 18+ drivers.
         """
         encrypt = ";Encrypt=yes" if "18" in self.driver else ""
-        trust   = ";TrustServerCertificate=yes" if "18" in self.driver else ""
+        trust = ";TrustServerCertificate=yes" if "18" in self.driver else ""
         raw = (
             f"DRIVER={{{self.driver}}};"
             f"SERVER={self.server},{self.port};"
@@ -63,10 +66,11 @@ class DatabaseConfig:
         params = quote_plus(raw)
         return f"mssql+pyodbc:///?odbc_connect={params}"
 
+
 def get_engine(
     config: DatabaseConfig,
-    pool_size: int     = 5,
-    max_overflow: int  = 10,
+    pool_size: int = 5,
+    max_overflow: int = 10,
 ) -> Engine:
     """
     Create a SQLAlchemy engine with pooling. Raises if config incomplete.
@@ -85,6 +89,7 @@ def get_engine(
     except SQLAlchemyError as e:
         raise RuntimeError(f"Error creating engine: {e}")
 
+
 def get_base(schema: str):
     """
     Return a declarative Base whose MetaData
@@ -92,6 +97,7 @@ def get_base(schema: str):
     """
     metadata = MetaData(schema=schema)
     return declarative_base(metadata=metadata)
+
 
 def test_connection(engine: Engine) -> bool:
     """
@@ -103,6 +109,7 @@ def test_connection(engine: Engine) -> bool:
         return True
     except SQLAlchemyError:
         return False
+
 
 def fetch_secret(engine, schema: str, secret_type: str) -> str:
     """Fetch a secret value from the Secrets table using the given schema."""

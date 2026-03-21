@@ -1,13 +1,16 @@
 # app/routes/discovery_routes.py
 
+import logging
+import socket
+
+import pyodbc
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+
 from app.utils.host_resolver import resolve_hostname
-import pyodbc
-import socket
-import logging
 
 router = APIRouter()
+
 
 class DatabaseDiscoveryRequest(BaseModel):
     host: str
@@ -15,7 +18,9 @@ class DatabaseDiscoveryRequest(BaseModel):
     user: str
     password: str
     driver: str
-    use_localhost_alias: bool = False  # Indicates if host should resolve as Docker's internal alias when running in container
+    # If True, host resolves to host.docker.internal (for use when running inside Docker)
+    use_localhost_alias: bool = False
+
 
 @router.get("/drivers")
 def list_sql_drivers():
@@ -25,10 +30,11 @@ def list_sql_drivers():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @router.get("/ping")
 def ping_host(host: str, port: int = 1433, use_localhost_alias: bool = False):
-    # This endpoint checks if the specified host and port are reachable.
-    # If use_localhost_alias is True, and we're in Docker, host.docker.internal is substituted for local hostnames.
+    # Checks if the specified host and port are reachable.
+    # If use_localhost_alias is True, host.docker.internal is substituted.
     try:
         resolved = resolve_hostname(host, use_localhost_alias)
         socket.create_connection((resolved, port), timeout=3).close()
@@ -36,13 +42,12 @@ def ping_host(host: str, port: int = 1433, use_localhost_alias: bool = False):
     except Exception:
         return {"reachable": False}
 
+
 @router.post("/databases")
 def list_databases(request: DatabaseDiscoveryRequest):
-    # Attempts to connect to the specified host using provided credentials.
-    # If use_localhost_alias is True and the app is running in Docker, the hostname will be resolved to Docker's special alias.
     try:
         resolved_host = resolve_hostname(request.host, request.use_localhost_alias)
-        logging.info(f"[discovery] Connecting to {resolved_host}:{request.port} as {request.user} using {request.driver}")
+        logging.info(f"[discovery] Connecting to {resolved_host}:{request.port} as {request.user}")
 
         cs = (
             f"DRIVER={{{request.driver}}};"
