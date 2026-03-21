@@ -1,0 +1,184 @@
+name: Claude PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+    branches: [main]
+
+jobs:
+  review:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get PR diff
+        run: gh pr diff ${{ github.event.pull_request.number }} > pr.diff
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get PR description
+        run: |
+          gh pr view ${{ github.event.pull_request.number }} \
+            --json title,body \
+            -q '"# " + .title + "\n\n" + .body' > pr_desc.txt
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get PR comments
+        run: |
+          gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
+            --jq '[.[] | "### Comment by " + .user.login + " at " + .created_at + "\n" + .body] | join("\n\n---\n\n")' \
+            > pr_comments.txt
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get linked issue
+        run: |
+          ISSUE_NUM=$(gh pr view ${{ github.event.pull_request.number }} --json body -q '.body' \
+            | grep -oP '(?<=Closes #|closes #|Fixes #|fixes #|Resolves #|resolves #)\d+' | head -1)
+          if [ -n "$ISSUE_NUM" ]; then
+            gh issue view "$ISSUE_NUM" --repo ${{ github.repository }} \
+              --json number,title,body -q '"# Issue #" + (.number | tostring) + ": " + .title + "\n\n" + .body' \
+              > linked_issue.txt 2>/dev/null || echo "(issue not found)" > linked_issue.txt
+          else
+            echo "(no linked issue found in PR body)" > linked_issue.txt
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build request body
+        run: |
+          cat > build_prompt.py << 'PYEOF'
+          import json, os
+
+          diff = open('pr.diff').read()
+          desc = open('pr_desc.txt').read()
+          comments_raw = open('pr_comments.txt').read().strip()
+          issue = open('linked_issue.txt').read().strip()
+
+          comments_section = (
+              "## PR Comment History (previous review rounds and author responses)\n\n"
+              + (comments_raw if comments_raw else "(no comments yet)")
+          )
+
+          issue_section = "## Linked Issue / Ticket\n\n" + issue
+
+          prompt = (
+              "You are a strict senior code reviewer for a Python/FastAPI + React project. "
+              "The product is admin-it: a self-hosted database administration panel for SQL Server. "
+              "Your job is to find real problems — not to be encouraging.\n\n"
+
+              "## Stack context\n\n"
+              "- Backend: Python FastAPI, SQLAlchemy (raw parameterised queries with sqlalchemy.text()), Pydantic, pyodbc for MSSQL\n"
+              "- Frontend: React 19, Vite, React Router v6, plain fetch (no axios)\n"
+              "- Database: Microsoft SQL Server — temporal tables used for audit history\n"
+              "- Auth: JWT (HS256), stored in localStorage; roles embedded in token and re-checked from DB on each request\n\n"
+
+              "## Important constraints\n\n"
+              "You only see the diff, not the full codebase. The PR description is written specifically "
+              "to give you context about surrounding code. Trust it. "
+              "If the PR description explains why something outside the diff makes a change safe, "
+              "accept that explanation rather than flagging it as risky.\n\n"
+              "This may not be a first review. Read the PR comment history carefully. "
+              "Do NOT re-raise issues already addressed or explained in the thread. "
+              "Only flag issues that are genuinely unresolved in the current diff.\n\n"
+              "Be careful about changes that REMOVE code: a removal may be the fix, not the problem.\n\n"
+
+              + issue_section + "\n\n"
+              + "## PR Description\n\n" + desc + "\n\n"
+              + comments_section + "\n\n"
+
+              "## What to check\n"
+              "1. **Correctness** — Does the logic do what the description claims?\n"
+              "2. **Security** — Missing auth/authorisation checks, unvalidated input, user-controlled data interpolated into SQL (not just parameterised), exposed secrets?\n"
+              "3. **Data layer** — Is user input properly validated via Pydantic before hitting the DB? Is business logic in the backend, not the frontend?\n"
+              "4. **API contract** — Do new endpoints follow the existing pattern (router, dependency injection for auth, consistent error responses)?\n"
+              "5. **Scope creep** — Does this do more than the ticket requires?\n"
+              "6. **Regressions** — Anything removed that other code still depends on?\n\n"
+
+              "## What NOT to flag\n"
+              "- Code in unchanged files\n"
+              "- Concerns already resolved in the PR comment history\n"
+              "- Intentional removals explained in the PR description\n"
+              "- The schema name being f-string interpolated into SQL — it comes from the encrypted config file, not user input at query time, and is documented as acceptable\n"
+              "- JWT in localStorage — this is a known, accepted trade-off for a self-hosted internal tool\n\n"
+
+              "**Format your response as:**\n\n"
+              "Only include a section if it has at least one item. Omit the section header entirely if you have nothing to put under it. "
+              "Do NOT write 'None.' under a section heading — just skip the section.\n\n"
+              "If you start writing an issue and then realise it is already fixed or withdrawn, "
+              "do NOT include it under any section heading. Mention it only in the Verdict.\n\n"
+              "### [BLOCKING] — must fix before merge\n"
+              "Each issue with file:line reference and explanation. Omit if none.\n\n"
+              "### [WARNING] — should fix, not blocking\n"
+              "Each issue with file:line reference. Omit if none.\n\n"
+              "### [NITPICK] — optional / style\n"
+              "Each issue with file:line reference. Omit if none.\n\n"
+              "### Verdict\n"
+              "One of: **APPROVE**, **REQUEST CHANGES**, or **NEEDS DISCUSSION**. "
+              "If approving, briefly note any previously-raised issues now confirmed fixed.\n\n"
+              "Be direct. If the code is fine, say so.\n\n"
+              "## Diff\n```diff\n" + diff + "\n```"
+          )
+
+          payload = {
+              "model": "claude-opus-4-6",
+              "max_tokens": 4096,
+              "messages": [{"role": "user", "content": prompt}]
+          }
+
+          with open('request.json', 'w') as f:
+              json.dump(payload, f)
+
+          print(f"Request written: {len(diff)} chars of diff, {len(prompt)} chars total prompt")
+          PYEOF
+          python3 build_prompt.py
+
+      - name: Call Claude API
+        run: |
+          HTTP_STATUS=$(curl -s -w "%{http_code}" \
+            -H "x-api-key: $ANTHROPIC_API_KEY" \
+            -H "anthropic-version: 2023-06-01" \
+            -H "content-type: application/json" \
+            --data-binary @request.json \
+            -o response.json \
+            https://api.anthropic.com/v1/messages)
+
+          echo "HTTP status: $HTTP_STATUS"
+          cat response.json
+
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "API returned HTTP $HTTP_STATUS"
+            exit 1
+          fi
+
+          python3 -c "
+          import json, sys
+          data = json.load(open('response.json'))
+          if 'content' in data and data['content']:
+              text = data['content'][0]['text']
+              with open('review.txt', 'w') as f:
+                  f.write(text)
+              print('Review extracted successfully')
+          else:
+              print('Unexpected response shape:', json.dumps(data, indent=2))
+              sys.exit(1)
+          "
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: Post review comment
+        run: |
+          gh pr comment ${{ github.event.pull_request.number }} \
+            --body "## Claude Code Review
+
+          $(cat review.txt)"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

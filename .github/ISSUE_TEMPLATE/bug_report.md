@@ -1,39 +1,31 @@
-﻿---
+---
 name: Bug Report
-about: Report a reproducible bug in Admin-IT
+about: Report a reproducible bug in admin-it
 title: "[Bug]: "
 labels: bug
 assignees: ''
-
 ---
 
-## 🐞 Bug Description
+## Description
 
-<!-- A clear and concise description of what the bug is. -->
+<!-- What is broken? Be specific — "clicking X causes Y" not "it doesn't work". -->
 
----
+## Steps to reproduce
 
-## 📋 Steps to Reproduce
+1.
+2.
+3.
 
-1. Go to '...'
-2. Click on '...'
-3. Scroll down to '...'
-4. See error
+## Expected behaviour
 
----
+## Actual behaviour
 
-## 🖥️ Expected Behavior
+## Environment
 
-<!-- A clear and concise description of what you expected to happen. -->
+- Browser / OS:
+- Deployed via Docker? Yes / No
+- SQL Server version (if relevant):
 
----
+## Logs / screenshots
 
-## 📷 Screenshots (if applicable)
-
-<!-- Add screenshots or logs to help explain your problem. -->
-
----
-
-## 📚 Additional Context
-
-<!-- Add any other context about the problem here (OS, browser, environment). -->
+<!-- Paste any backend traceback or browser console errors here. -->

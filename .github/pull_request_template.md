@@ -1,41 +1,42 @@
-﻿# Pull Request - Admin-IT
+## Issue reference
 
-Thank you for contributing! Please fill out this template to help us review faster.
+Closes #
 
----
+## Summary
 
-## 📋 Description
+<!-- One or two sentences. What does this PR do and why? -->
 
-<!-- Briefly describe the changes you made -->
+## Changes
 
----
+<!-- Specific list of what changed. Name files/areas touched. -->
 
-## ✅ Checklist
+-
+-
 
-- [ ] Backend runs locally without errors (`uvicorn backend.app.main:app --reload`)
-- [ ] Frontend runs locally without errors (`npm run dev`)
-- [ ] Code passes frontend lint checks (`npm run lint`)
-- [ ] Code is formatted correctly (`npm run format`)
-- [ ] Code follows project style guidelines (Python PEP8, React best practices)
-- [ ] Relevant documentation updated (if necessary)
+## Security model
 
----
+<!-- Explicitly state the auth/authorisation story for this change.
+     Who can call new endpoints? What resource ownership checks are in place?
+     If no security-relevant changes, write "No security surface changed." -->
 
-## 🧪 Testing Details
+## Testing
 
-<!-- How did you verify your changes? What manual or automated tests were done? -->
+<!-- How was this verified? -->
 
----
+- [ ] Tested locally (backend + frontend running against Docker stack)
+- [ ] New API endpoints manually exercised with expected + edge-case inputs
+- [ ] UI changes visually verified in browser
 
-## 🔗 Related Issues
+## Checklist
 
-<!-- Link any related issues or feature requests -->
+- [ ] Branch named `feature/NNN-short-description` or `fix/NNN-short-description`
+- [ ] Backend: no raw string interpolation of user input into SQL
+- [ ] Backend: new routes registered in `main.py` with correct auth dependency
+- [ ] Frontend: no sensitive data written to `localStorage` beyond the JWT token
+- [ ] `npm run lint` passes
+- [ ] `npm run format:check` passes (or `npm run format` run and changes committed)
+- [ ] CI checks pass
 
----
+## Screenshots (if UI change)
 
-## 📜 Notes for Reviewers
-
-<!-- Any extra context reviewers should be aware of -->
-
----
-
+<!-- Delete if not applicable -->
