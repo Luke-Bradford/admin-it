@@ -25,6 +25,7 @@ from app.utils.secure_config import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 # Generate a Fernet key for encrypting core config if not present
 ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
@@ -63,7 +64,7 @@ class AdminUserInput(BaseModel):
 @router.post("/test-connection")
 async def test_connection(details: ConnDetails):
     resolved_host = resolve_hostname(details.db_host, use_localhost_alias=details.use_localhost_alias)
-    print(f"[test-connection] Using resolved host: {resolved_host}")
+    logger.debug("[test-connection] Using resolved host: %s", resolved_host)
 
     cs = (
         f"DRIVER={{{details.odbc_driver}}};"
