@@ -23,10 +23,7 @@ def get_databases(
     Returns a list of databases accessible with the provided credentials.
     """
     conn_str = (
-        f"DRIVER={{{driver}}};"
-        f"SERVER={host},{port};"
-        f"UID={user};PWD={password};"
-        f"Encrypt=yes;TrustServerCertificate=yes"
+        f"DRIVER={{{driver}}};SERVER={host},{port};UID={user};PWD={password};Encrypt=yes;TrustServerCertificate=yes"
     )
     try:
         conn = pyodbc.connect(conn_str, timeout=3)

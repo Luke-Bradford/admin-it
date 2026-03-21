@@ -15,9 +15,11 @@ from app.database.database_setup import is_core_schema_deployed
 
 app = FastAPI()
 
+
 @app.get("/ping")
 def ping():
     return {"message": "pong"}
+
 
 @app.on_event("startup")
 def load_jwt_secret():
@@ -31,6 +33,7 @@ def load_jwt_secret():
     except Exception as e:
         print(f"[startup] Failed to load JWT secret: {e}")
         raise e  # Let FastAPI crash early if critical setup fails
+
 
 # CORS setup
 app.add_middleware(

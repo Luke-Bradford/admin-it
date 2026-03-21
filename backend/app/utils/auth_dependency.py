@@ -10,6 +10,7 @@ from app import settings
 
 security = HTTPBearer()
 
+
 def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
     token = credentials.credentials
     try:
@@ -27,13 +28,16 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
 
     # Fetch user info + roles from DB
     with engine.connect() as conn:
-        result = conn.execute(text(f"""
+        result = conn.execute(
+            text(f"""
             SELECT u.Username, u.IsActive, r.RoleName
             FROM [{schema}].[Users] u
             LEFT JOIN [{schema}].[UserRoles] ur ON u.UserId = ur.UserId
             LEFT JOIN [{schema}].[Roles] r ON ur.RoleId = r.RoleId
             WHERE u.UserId = :uid
-        """), {"uid": user_id}).fetchall()
+        """),
+            {"uid": user_id},
+        ).fetchall()
 
         if not result:
             raise HTTPException(status_code=403, detail="User not found")

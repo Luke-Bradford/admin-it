@@ -9,6 +9,7 @@ import logging
 
 router = APIRouter()
 
+
 class DatabaseDiscoveryRequest(BaseModel):
     host: str
     port: int
@@ -18,6 +19,7 @@ class DatabaseDiscoveryRequest(BaseModel):
     # If True, host resolves to host.docker.internal (for use when running inside Docker)
     use_localhost_alias: bool = False
 
+
 @router.get("/drivers")
 def list_sql_drivers():
     try:
@@ -25,6 +27,7 @@ def list_sql_drivers():
         return {"drivers": drivers}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/ping")
 def ping_host(host: str, port: int = 1433, use_localhost_alias: bool = False):
@@ -36,6 +39,7 @@ def ping_host(host: str, port: int = 1433, use_localhost_alias: bool = False):
         return {"reachable": True}
     except Exception:
         return {"reachable": False}
+
 
 @router.post("/databases")
 def list_databases(request: DatabaseDiscoveryRequest):

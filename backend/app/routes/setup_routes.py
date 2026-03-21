@@ -1,4 +1,4 @@
-﻿# app/routes/setup_routes.py
+# app/routes/setup_routes.py
 
 import traceback
 import logging
@@ -96,12 +96,7 @@ async def setup(details: ConnDetails):
 
     masked = raw.copy()
     masked["db_password"] = "*" * len(raw["db_password"])
-    return {
-        "configured": True,
-        "connection": masked,
-        "status": "success",
-        "message": "Core initialized."
-    }
+    return {"configured": True, "connection": masked, "status": "success", "message": "Core initialized."}
 
 
 @router.get("")
@@ -120,11 +115,7 @@ async def get_setup():
 @router.delete("")
 async def delete_setup():
     delete_core_config()
-    return {
-        "configured": False,
-        "status": "success",
-        "message": "Deleted."
-    }
+    return {"configured": False, "status": "success", "message": "Deleted."}
 
 
 @router.get("/deploy-status")
@@ -137,6 +128,7 @@ def check_deploy_status():
         logging.error(f"Error checking deployment status: {str(e)}")
         logging.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail="Failed to determine deployment status")
+
 
 @router.post("/deploy-schema")
 def trigger_deploy_schema():
@@ -160,19 +152,23 @@ def create_admin_user(user: AdminUserInput):
 
         with engine.begin() as conn:
             # Prevent duplicate SystemAdmin users
-            existing = conn.execute(text(f"""
+            existing = conn.execute(
+                text(f"""
                 SELECT COUNT(*)
                 FROM [{config.schema}].[Users] u
                 JOIN [{config.schema}].[UserRoles] ur ON u.UserId = ur.UserId
                 JOIN [{config.schema}].[Roles] r ON ur.RoleId = r.RoleId
                 WHERE r.RoleName = 'SystemAdmin'
-            """)).scalar()
+            """)
+            ).scalar()
             if existing > 0:
                 raise HTTPException(status_code=400, detail="SystemAdmin user already exists.")
 
-            role_id = conn.execute(text(f"""
+            role_id = conn.execute(
+                text(f"""
                 SELECT TOP 1 RoleId FROM [{config.schema}].[Roles] WHERE RoleName = 'SystemAdmin'
-            """)).scalar()
+            """)
+            ).scalar()
             if not role_id:
                 raise HTTPException(status_code=500, detail="SystemAdmin role not found.")
 
@@ -181,7 +177,8 @@ def create_admin_user(user: AdminUserInput):
             hashed = hashlib.sha256((user.password + salt).encode()).hexdigest()
 
             # Insert User
-            conn.execute(text(f"""
+            conn.execute(
+                text(f"""
                 INSERT INTO [{config.schema}].[Users] (
                     UserId, Username, Email, PasswordHash,
                     CreatedById, CreatedDate, ModifiedById, ModifiedDate
@@ -189,10 +186,13 @@ def create_admin_user(user: AdminUserInput):
                     :uid, :username, :email, :phash,
                     NULL, :now, NULL, :now
                 )
-            """), dict(uid=user_id, username=user.username, email=user.email, phash=hashed, now=now))
+            """),
+                dict(uid=user_id, username=user.username, email=user.email, phash=hashed, now=now),
+            )
 
             # Insert Secret
-            conn.execute(text(f"""
+            conn.execute(
+                text(f"""
                 INSERT INTO [{config.schema}].[UserSecrets] (
                     UserSecretId, UserId, Salt,
                     CreatedById, CreatedDate, ModifiedById, ModifiedDate
@@ -200,10 +200,13 @@ def create_admin_user(user: AdminUserInput):
                     :sid, :uid, :salt,
                     NULL, :now, NULL, :now
                 )
-            """), dict(sid=str(uuid.uuid4()), uid=user_id, salt=salt, now=now))
+            """),
+                dict(sid=str(uuid.uuid4()), uid=user_id, salt=salt, now=now),
+            )
 
             # Insert Role Mapping
-            conn.execute(text(f"""
+            conn.execute(
+                text(f"""
                 INSERT INTO [{config.schema}].[UserRoles] (
                     UserId, RoleId, AssignedDate,
                     CreatedById, CreatedDate, ModifiedById, ModifiedDate
@@ -211,7 +214,9 @@ def create_admin_user(user: AdminUserInput):
                     :uid, :rid, :now,
                     NULL, :now, NULL, :now
                 )
-            """), dict(uid=user_id, rid=role_id, now=now))
+            """),
+                dict(uid=user_id, rid=role_id, now=now),
+            )
 
         return {"status": "success", "message": "Admin user created."}
 
@@ -228,13 +233,15 @@ def check_admin_user_present():
         config, engine = get_config_and_engine()
         schema = config.schema
         with engine.connect() as conn:
-            result = conn.execute(text(f"""
+            result = conn.execute(
+                text(f"""
                 SELECT COUNT(*) FROM [{schema}].[Users] u
                 JOIN [{schema}].[UserRoles] ur ON ur.UserId = u.UserId
                 JOIN [{schema}].[Roles] r ON r.RoleId = ur.RoleId
                 WHERE r.RoleName = 'SystemAdmin'
-            """))
+            """)
+            )
             count = result.scalar()
-            return { "present": count > 0 }
+            return {"present": count > 0}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to check for admin user: {e}")

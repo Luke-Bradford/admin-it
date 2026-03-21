@@ -7,14 +7,19 @@ from sqlalchemy.engine import Engine
 
 import traceback
 
-SQL_FILE_PATH = os.path.join(os.path.dirname(__file__), '../sql/spDeployCoreSchema.sql')
+SQL_FILE_PATH = os.path.join(os.path.dirname(__file__), "../sql/spDeployCoreSchema.sql")
 
 
-def is_core_schema_deployed(engine: Engine, schema: str = 'adm') -> bool:
+def is_core_schema_deployed(engine: Engine, schema: str = "adm") -> bool:
     expected_tables = [
-        "Users", "UserSecrets", "Roles", "UserRoles",
-        "Connections", "ConnectionPermissions", "UserConnectionAccess",
-        "Secrets"
+        "Users",
+        "UserSecrets",
+        "Roles",
+        "UserRoles",
+        "Connections",
+        "ConnectionPermissions",
+        "UserConnectionAccess",
+        "Secrets",
     ]
 
     try:
@@ -32,12 +37,12 @@ def is_core_schema_deployed(engine: Engine, schema: str = 'adm') -> bool:
         return False
 
 
-def deploy_core_schema(engine: Engine, schema: str = 'adm') -> None:
+def deploy_core_schema(engine: Engine, schema: str = "adm") -> None:
     """
     Deploys the core schema by loading and executing the schema deployment SQL script.
     """
     try:
-        with open(SQL_FILE_PATH, 'r', encoding='utf-8') as file:
+        with open(SQL_FILE_PATH, "r", encoding="utf-8") as file:
             sql_script = file.read()
 
         # Inject schema name by simple replacement (safe: schema comes from encrypted config, not user input)
