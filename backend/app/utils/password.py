@@ -38,7 +38,11 @@ def verify_password(password: str, stored_hash: str, salt: str) -> bool:
       can rehash to argon2id.
     """
     if needs_rehash(stored_hash):
-        # Legacy SHA-256 path — timing-safe comparison
+        # Legacy SHA-256 path — timing-safe comparison.
+        # Guard against a corrupted DB row where Salt is not a string.
+        if not isinstance(salt, str):
+            logger.warning("verify_password: SHA-256 path but Salt is not a string — possible corrupted row")
+            return False
         expected = hashlib.sha256((password + salt).encode("utf-8")).hexdigest()
         return hmac.compare_digest(expected, stored_hash)
 

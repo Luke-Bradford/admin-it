@@ -1,5 +1,6 @@
 # backend/app/routes/auth_routes.py
 
+import logging
 from datetime import datetime, timedelta, timezone
 
 import jwt as pyjwt  # PyJWT
@@ -86,9 +87,10 @@ def login(request: LoginRequest):
                 """),
                     {"uid": user_id},
                 )
-        except Exception:
+        except Exception as rehash_err:
             # Rehash failure is non-fatal — user is still logged in with SHA-256 this time.
-            pass
+            # Log so an operator can see if migrations are silently failing in production.
+            logging.getLogger(__name__).warning("SHA-256 → argon2id rehash failed for user %s: %s", user_id, rehash_err)
 
     # 3. Fetch roles in a separate query.
     with engine.connect() as conn:
