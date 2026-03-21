@@ -58,7 +58,7 @@ jobs:
           cat > build_prompt.py << 'PYEOF'
           import json, os
 
-          diff = open('pr.diff').read()
+          diff = open('pr.diff', encoding='utf-8', errors='replace').read()
           desc = open('pr_desc.txt').read()
           comments_raw = open('pr_comments.txt').read().strip()
           issue = open('linked_issue.txt').read().strip()
