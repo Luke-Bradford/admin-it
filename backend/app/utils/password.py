@@ -5,12 +5,19 @@
 # Existing SHA-256 hashes (stored as 64-char hex strings with a non-empty Salt)
 # are verified with hmac.compare_digest and transparently migrated to argon2id
 # on the user's next successful login.
+#
+# Salt sentinel: UserSecrets.Salt is a NOT NULL column. After migration to argon2id
+# the Salt is set to "" (empty string). needs_rehash() inspects only the hash string
+# format, not Salt, so it is safe even if Salt is somehow inconsistent.
 
 import hashlib
 import hmac
+import logging
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
+
+logger = logging.getLogger(__name__)
 
 _ph = PasswordHasher()
 
@@ -41,6 +48,11 @@ def verify_password(password: str, stored_hash: str, salt: str) -> bool:
     except VerifyMismatchError:
         return False
     except InvalidHashError:
+        # stored_hash is neither a valid argon2 hash nor a SHA-256 hex string.
+        # This should never happen on a healthy database but could indicate a
+        # corrupted credential store (truncated write, wrong column, etc.).
+        # Log at WARNING so an operator can diagnose a stuck account.
+        logger.warning("verify_password: InvalidHashError for stored hash — possible corrupted credential")
         return False
 
 

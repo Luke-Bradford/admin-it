@@ -59,7 +59,12 @@ def login(request: LoginRequest):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password.")
 
     # 2. Transparent migration: if the stored hash is SHA-256, rehash to argon2id.
-    #    Done in its own transaction so a rehash failure never blocks login.
+    #    Both UPDATEs (PasswordHash and Salt) are inside the same engine.begin()
+    #    transaction — they commit atomically or both roll back. If the process is
+    #    killed between commit and token delivery the user will have an argon2id hash
+    #    with a non-empty Salt, but needs_rehash() inspects only the hash string format
+    #    (not Salt), so next login takes the argon2id path and succeeds. Salt becomes
+    #    a dangling orphan with no functional impact.
     if needs_rehash(stored_hash):
         try:
             new_hash = hash_password(request.password)
