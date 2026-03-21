@@ -3,10 +3,9 @@
 import os
 from urllib.parse import quote_plus
 
-from sqlalchemy import MetaData, create_engine
+from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import declarative_base
 from sqlalchemy.sql import text
 
 
@@ -88,15 +87,6 @@ def get_engine(
         )
     except SQLAlchemyError as e:
         raise RuntimeError(f"Error creating engine: {e}")
-
-
-def get_base(schema: str):
-    """
-    Return a declarative Base whose MetaData
-    has schema=<whatever> by default.
-    """
-    metadata = MetaData(schema=schema)
-    return declarative_base(metadata=metadata)
 
 
 def test_connection(engine: Engine) -> bool:

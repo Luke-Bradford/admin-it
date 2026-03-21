@@ -1,6 +1,5 @@
 # app/routes/setup_routes.py
 
-import hashlib
 import logging
 import os
 import traceback
@@ -11,14 +10,16 @@ from pathlib import Path
 import pyodbc
 from cryptography.fernet import Fernet, InvalidToken
 from dotenv import load_dotenv
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 
 from app.database.database_setup import deploy_core_schema, is_core_schema_deployed
-from app.utils.db_helpers import get_config_and_engine
+from app.utils.auth_dependency import verify_token
+from app.utils.db_helpers import get_config_and_engine, init_engine
 from app.utils.host_resolver import resolve_hostname
+from app.utils.password import hash_password
 from app.utils.secure_config import (
     core_config_exists,
     delete_core_config,
@@ -53,9 +54,7 @@ class ConnDetails(BaseModel):
     odbc_driver: str = Field("ODBC Driver 17 for SQL Server", alias="odbc_driver")
     use_localhost_alias: bool = False  # ← Added to enable Docker host resolution
 
-    class Config:
-        allow_population_by_alias = True
-        allow_population_by_field_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class AdminUserInput(BaseModel):
@@ -92,8 +91,14 @@ async def setup(details: ConnDetails):
     # Test DB connectivity before saving config
     await test_connection(details)
 
-    raw = details.dict(by_alias=True)
+    raw = details.model_dump(by_alias=True)
     save_core_config(raw)
+
+    # Initialise the engine singleton so subsequent requests don't require a restart.
+    try:
+        init_engine()
+    except Exception as e:
+        logging.warning(f"[setup] Engine init after config save failed: {e}")
 
     masked = raw.copy()
     masked["db_password"] = "*" * len(raw["db_password"])
@@ -114,7 +119,9 @@ async def get_setup():
 
 
 @router.delete("")
-async def delete_setup():
+async def delete_setup(current_user: dict = Depends(verify_token)):
+    if "SystemAdmin" not in current_user.get("roles", []):
+        raise HTTPException(status_code=403, detail="SystemAdmin role required")
     delete_core_config()
     return {"configured": False, "status": "success", "message": "Deleted."}
 
@@ -140,6 +147,22 @@ def trigger_deploy_schema():
             return JSONResponse(status_code=200, content={"message": "Schema already deployed."})
 
         deploy_core_schema(engine, schema=config.schema)
+
+        # Reload JWT secret now that the schema (and Secrets table) exists.
+        # Imported here rather than at module top to avoid a circular import:
+        # setup_routes → settings → (nothing), but main.py imports both, and moving
+        # these to module level would require restructuring the app factory.
+        from app import settings
+        from app.db import fetch_secret
+
+        try:
+            secret = fetch_secret(engine, config.schema, "JWT_SECRET")
+            if secret:
+                settings.JWT_SECRET = secret
+                print("[deploy-schema] JWT secret loaded after schema deployment.")
+        except Exception as secret_err:
+            logging.warning(f"[deploy-schema] Could not load JWT secret: {secret_err}")
+
         return {"message": "Schema deployed successfully."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -174,8 +197,8 @@ def create_admin_user(user: AdminUserInput):
                 raise HTTPException(status_code=500, detail="SystemAdmin role not found.")
 
             user_id = str(uuid.uuid4())
-            salt = os.urandom(16).hex()
-            hashed = hashlib.sha256((user.password + salt).encode()).hexdigest()
+            # argon2id embeds its own salt — no separate salt column needed for new users.
+            hashed = hash_password(user.password)
 
             # Insert User
             conn.execute(
@@ -191,18 +214,18 @@ def create_admin_user(user: AdminUserInput):
                 dict(uid=user_id, username=user.username, email=user.email, phash=hashed, now=now),
             )
 
-            # Insert Secret
+            # Insert UserSecrets row — Salt is empty for argon2id hashes (salt is embedded in the hash).
             conn.execute(
                 text(f"""
                 INSERT INTO [{config.schema}].[UserSecrets] (
                     UserSecretId, UserId, Salt,
                     CreatedById, CreatedDate, ModifiedById, ModifiedDate
                 ) VALUES (
-                    :sid, :uid, :salt,
+                    :sid, :uid, '',
                     NULL, :now, NULL, :now
                 )
             """),
-                dict(sid=str(uuid.uuid4()), uid=user_id, salt=salt, now=now),
+                dict(sid=str(uuid.uuid4()), uid=user_id, now=now),
             )
 
             # Insert Role Mapping

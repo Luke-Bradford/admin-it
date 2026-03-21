@@ -1,7 +1,6 @@
 # backend/app/routes/auth_routes.py
 
-import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import jwt as pyjwt  # PyJWT
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -12,32 +11,26 @@ from sqlalchemy import text
 from app import settings
 from app.db import fetch_secret
 from app.utils.db_helpers import get_config_and_engine
+from app.utils.password import hash_password, needs_rehash, verify_password
 
 router = APIRouter()
 security = HTTPBearer()
 
 
-# Request model
 class LoginRequest(BaseModel):
     username: str
     password: str
 
 
-# Response model
 class LoginResponse(BaseModel):
     token: str
     expires_at: datetime
 
 
-# User Info model
 class UserInfo(BaseModel):
     user_id: str
     username: str
     roles: list[str]
-
-
-def hash_password(password: str, salt: str) -> str:
-    return hashlib.sha256((password + salt).encode("utf-8")).hexdigest()
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -45,8 +38,8 @@ def login(request: LoginRequest):
     config, engine = get_config_and_engine()
     schema = config.schema
 
+    # Step 1: fetch user and verify password (read-only connection).
     with engine.connect() as conn:
-        # Get user and hash
         user_result = conn.execute(
             text(f"""
             SELECT u.UserId, u.Username, u.PasswordHash, us.Salt
@@ -62,10 +55,26 @@ def login(request: LoginRequest):
 
         user_id, username, stored_hash, salt = user_result
 
-        if hash_password(request.password, salt) != stored_hash:
+        if not verify_password(request.password, stored_hash, legacy_salt=salt):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password.")
 
-        # Get roles
+    # Step 2: migrate legacy SHA-256 hash to argon2id in its own committed transaction.
+    # Isolated so a later failure cannot silently drop the upgrade.
+    # For users already on argon2id, needs_rehash() returns False and this block is skipped.
+    if needs_rehash(stored_hash):
+        new_hash = hash_password(request.password)
+        with engine.begin() as conn:
+            conn.execute(
+                text(f"""
+                UPDATE [{schema}].[Users]
+                SET PasswordHash = :new_hash
+                WHERE UserId = :uid
+            """),
+                {"new_hash": new_hash, "uid": user_id},
+            )
+
+    # Step 3: fetch roles (read-only connection).
+    with engine.connect() as conn:
         roles_result = conn.execute(
             text(f"""
             SELECT r.RoleName
@@ -78,22 +87,17 @@ def login(request: LoginRequest):
 
         roles = [row[0] for row in roles_result] if roles_result else []
 
-        # Load the secret from DB
-        jwt_secret = fetch_secret(engine, schema, "JWT_SECRET")
-
-        # Build JWT
-        expires_delta = timedelta(hours=settings.JWT_EXPIRES_HOURS)
-        expire_time = datetime.utcnow() + expires_delta
-        payload = {
-            "sub": str(user_id),
-            "username": username,
-            "roles": roles,
-            "exp": expire_time,
-        }
-
-        token = pyjwt.encode(payload, jwt_secret, algorithm=settings.JWT_ALGORITHM)
-
-        return LoginResponse(token=token, expires_at=expire_time)
+    jwt_secret = fetch_secret(engine, schema, "JWT_SECRET")
+    expires_delta = timedelta(hours=settings.JWT_EXPIRES_HOURS)
+    expire_time = datetime.now(timezone.utc) + expires_delta
+    payload = {
+        "sub": str(user_id),
+        "username": username,
+        "roles": roles,
+        "exp": expire_time,
+    }
+    token = pyjwt.encode(payload, jwt_secret, algorithm=settings.JWT_ALGORITHM)
+    return LoginResponse(token=token, expires_at=expire_time)
 
 
 @router.get("/me", response_model=UserInfo)
