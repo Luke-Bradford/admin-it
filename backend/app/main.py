@@ -1,5 +1,6 @@
 # app/main.py
 
+import logging
 import os
 from contextlib import asynccontextmanager
 
@@ -15,6 +16,8 @@ from app.routes.setup_routes import router as setup_router
 from app.utils.db_helpers import init_engine
 from app.utils.secure_config import core_config_exists
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -27,13 +30,13 @@ async def lifespan(app: FastAPI):
             if not secret:
                 raise ValueError("JWT secret not found in the database.")
             settings.JWT_SECRET = secret
-            print("[startup] JWT secret loaded successfully.")
+            logger.info("[startup] JWT secret loaded successfully.")
         except Exception as e:
             settings.JWT_SECRET = None
-            print(f"[startup] Failed to load JWT secret: {e}")
+            logger.warning("[startup] Failed to load JWT secret: %s", e)
     else:
         settings.JWT_SECRET = None
-        print("[startup] No config file — setup not complete.")
+        logger.info("[startup] No config file — setup not complete.")
 
     yield
     # Shutdown: nothing to clean up.
