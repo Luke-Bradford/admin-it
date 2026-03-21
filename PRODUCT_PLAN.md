@@ -8,39 +8,116 @@ The commercial angle: most SMBs and mid-market companies have SQL Server databas
 
 ---
 
+## Deployment model
+
+**Single-instance, multi-environment aware.**
+
+One admin-it installation per team or org unit. It maintains its own admin schema on a single SQL Server database, but can connect out to any number of *target databases* on any reachable server.
+
+**Dev→prod workflow:** An engineer deploys the admin-it schema to the prod SQL Server using the same idempotent deployment script (`spDeployCoreSchema.sql`). The prod instance is then configured independently — connection strings, users, and permissions are entered manually. No config is transferred between instances. Schema changes (new tables, columns, stored procedures) are promoted to prod by re-running the deployment script — which must be fully idempotent (`IF NOT EXISTS`, `ALTER TABLE` for new columns, never `DROP/CREATE` on objects with data).
+
+---
+
 ## User personas
 
 | Persona | Who they are | What they need |
 |---|---|---|
-| **End user** | Ops, finance, support — not technical | Browse tables, filter rows, export data, see audit history. Never writes SQL. |
+| **End user** | Ops, finance, support — not technical | Browse tables, filter rows, export data. Never writes SQL. Read or write based on their table-level permissions. |
 | **Power user** | Analyst or technically-minded ops person | Run saved queries, build simple reports, schedule exports. May write basic SQL. |
 | **Admin** | IT engineer or senior developer | Manage connections, users, roles, permissions. Wires the tool up initially. |
 | **System admin** | The person who installed admin-it | Everything — first-run setup, schema deployment, system settings, backup. |
 
 ---
 
+## Permission model
+
+### Connection-level access
+
+Every user gets a connection-level permission for each connection they can see:
+
+| Level | Can do |
+|-------|--------|
+| `Read` | Browse all tables in connection (read-only) |
+| `Write` | Browse all tables; can edit/insert/delete rows where not overridden |
+| `Admin` | Write access + can manage permissions on this connection |
+
+### Table-level overrides
+
+Table-level permissions **override** the connection-level default for specific tables:
+
+- Connection `Write` + Table `Read` override → user is read-only on that table, write everywhere else
+- Connection `Read` + Table `Write` override → user can write on that table, read everywhere else
+
+**Resolution rule:** If a `TablePermissions` row exists for `(user, connection, schema, table)`, use it. Otherwise inherit connection-level permission.
+
+### Write operations
+
+Write access (where permitted) means: inline row editing in the data browser, adding new rows, deleting rows. The target database enforces NOT NULL, FK constraints, and all other integrity rules. admin-it catches DB errors and returns clean user-facing messages — no raw SQL exceptions exposed.
+
+### Credential model
+
+admin-it connects to target databases using a **service account** configured per connection (SQL auth username + password). End users never need database credentials. The service account is stored encrypted at rest.
+
+**Credential storage — phased approach:**
+- **Phase 2:** Fernet-encrypted inline (key in `[adm].[Secrets]`). Admin-only access to view/change.
+- **Later:** Azure Key Vault support — connection stores a Key Vault secret reference (`keyvault://vault-name/secret-name`). admin-it authenticates via managed identity or service principal. The `Connections` table has a `CredentialSource` column from day one (`inline` | `keyvault`) to avoid a schema migration later.
+
+---
+
+## Design principles
+
+- **Clean, professional, functional.** This is an internal tool used daily by non-technical staff. It must feel polished, not like a developer prototype. No decorative flourishes — clarity and consistency over visual noise.
+- **Simple user experience.** If a user has to think about how to do something, the UI has failed. Permissions are invisible to the user — they see only what they can do, never what they can't.
+- **No raw SQL for end users.** Ever. Saved queries expose a form; the data browser exposes filters. SQL stays server-side.
+- **Security in depth.** Auth ≠ authz. Every operation checks both. No user input interpolated into SQL. Credentials never leave the server unencrypted.
+
+---
+
 ## Phases
 
-### Phase 0 — Foundation (current state)
-First-run wizard, auth, JWT middleware, schema deployment into SQL Server. Mostly complete.
+### Phase 0 — Foundation (complete)
+First-run wizard, auth, JWT middleware, schema deployment into SQL Server.
 
-### Phase 1 — Core hardening (make what exists production-safe)
-Fix the critical security and reliability issues before building on top.
+### Phase 1 — Core hardening (in progress)
+Fix critical security and reliability issues before building on top. No new features until this is done.
 
 ### Phase 2 — Connection & user management (Admin persona)
-The engineer can manage connections and users from the UI, not by touching the DB directly.
+Engineer can manage connections, users, and permissions from the UI. Minimum viable product for handing off to a non-technical admin.
 
-### Phase 3 — Data browser (End user + Power user persona)
-Non-technical users can browse, filter, and export data from connected databases.
+### Phase 3 — Data browser (End user + Power user)
+Browse, filter, and interact with data from connected databases. Read and write based on table-level permissions.
 
-### Phase 4 — Saved queries & basic reporting (Power user persona)
-Power users can build and share parameterised queries that non-technical users can run safely.
+### Phase 4 — Saved queries & basic reporting (Power user)
+Parameterised queries built by power users, run safely by end users via a generated form.
 
 ### Phase 5 — Audit & compliance (all personas)
-Full audit trail UI — who did what, when, on which connection.
+Full audit trail UI surfacing SQL Server temporal table history. Login history, account lockout visibility.
 
-### Phase 6 — AI assistant (End user persona)
-Natural language to SQL — the user describes what they want, the system generates and runs the query safely.
+### Phase 6 — AI assistant (End user)
+Natural language to SQL — user describes what they want, Claude generates a SELECT, user confirms before execution.
+
+---
+
+## Schema additions required (vs current deployed schema)
+
+### New table: `[adm].[TablePermissions]`
+Stores table-level permission overrides. If no row exists, connection-level permission is inherited.
+
+```sql
+TablePermissionId  UNIQUEIDENTIFIER  PRIMARY KEY DEFAULT NEWID()
+ConnectionId       UNIQUEIDENTIFIER  NOT NULL  REFERENCES [adm].[Connections]
+SchemaName         NVARCHAR(128)     NOT NULL
+TableName          NVARCHAR(128)     NOT NULL
+UserId             UNIQUEIDENTIFIER  NOT NULL  REFERENCES [adm].[Users]
+PermissionType     NVARCHAR(20)      NOT NULL  -- 'Read' | 'Write' | 'Admin'
+-- Temporal versioning (SYSTEM_VERSIONING = ON)
+```
+
+### Column addition: `[adm].[Connections].CredentialSource`
+```sql
+CredentialSource   NVARCHAR(20)      NOT NULL  DEFAULT 'inline'  -- 'inline' | 'keyvault'
+CredentialRef      NVARCHAR(500)     NULL       -- Key Vault URI when CredentialSource = 'keyvault'
+```
 
 ---
 
@@ -54,88 +131,102 @@ Each ticket is sized S / M / L / XL (engineer-days of effort, roughly).
 
 ---
 
-#### #1 — Fix password hashing (SHA-256 → argon2id)
+#### #44 — Fix password hashing (SHA-256 → argon2id)
 **Size:** S
-**Persona:** System admin (security)
-**Problem:** Passwords are hashed with SHA-256 + salt. SHA-256 is fast by design, making it trivially brute-forceable with modern hardware. Any credential leak exposes all passwords.
+**GitHub:** https://github.com/Luke-Bradford/admin-it/issues/44
+**Problem:** Passwords hashed with SHA-256 — trivially brute-forceable on any credential leak.
 **Acceptance criteria:**
-- Passwords stored using `argon2id` (via `argon2-cffi`) — preferred over bcrypt as it is memory-hard and the current OWASP recommendation
-- Existing SHA-256 hashes migrated on next login (re-hash on successful password verify)
-- No visible change to end users
-- `requirements.txt` updated with `argon2-cffi`
+- `argon2-cffi` added to `requirements.txt`
+- New passwords hashed with argon2id
+- Existing SHA-256 hashes migrated transparently on next successful login
+- `ruff check` and `ruff format --check` pass
 
 ---
 
-#### #2 — Fix startup crash before setup completes
+#### #45 — Fix startup crash before setup completes
 **Size:** S
-**Persona:** System admin
-**Problem:** On a fresh install (before running the setup wizard), the FastAPI app crashes on startup because the `startup` event tries to load the JWT secret from a database that doesn't exist yet. The setup wizard depends on the backend being running — creating a chicken-and-egg failure.
+**GitHub:** https://github.com/Luke-Bradford/admin-it/issues/45
+**Problem:** App crashes on startup if no config file exists — setup wizard unreachable on fresh install.
 **Acceptance criteria:**
-- App starts cleanly with no config file present
-- Setup routes (`/api/setup/*`) are available immediately on first start
-- Protected routes return 503 or similar until setup is complete, not a crash
-- `app.on_event("startup")` replaced with `lifespan` context manager (FastAPI best practice)
+- Replace `@app.on_event("startup")` with `lifespan` context manager
+- Startup completes cleanly with no config present
+- Setup routes available immediately
+- Protected routes return `503` (not crash) if JWT secret not yet loaded
 
 ---
 
-#### #3 — Cache the database engine (fix per-request engine creation)
+#### #46 — Cache the database engine
 **Size:** S
-**Persona:** All (performance & reliability)
-**Problem:** `get_config_and_engine()` decrypts the config file and calls `create_engine()` on every single HTTP request. SQLAlchemy's connection pool is re-created each time — defeating pooling entirely and adding unnecessary latency and file I/O to every request.
+**GitHub:** https://github.com/Luke-Bradford/admin-it/issues/46
+**Problem:** `get_config_and_engine()` recreates the SQLAlchemy engine on every HTTP request — no connection pooling, unnecessary file I/O and decryption on every call.
 **Acceptance criteria:**
-- Engine created once at startup and held as a module-level singleton
-- Config decryption happens once at startup
-- On config change (re-run of setup), engine is restarted cleanly
-- No regression in setup wizard flow
+- Engine created once at startup, held as singleton
+- Config decrypted once at startup
+- Engine restarted cleanly on setup config change without server restart
 
 ---
 
-#### #4 — Protect the setup delete endpoint
+#### #47 — Protect the setup delete endpoint
 **Size:** S
-**Persona:** System admin (security)
-**Problem:** `DELETE /api/setup` has no authentication check. Any unauthenticated user who can reach the backend can destroy the core config, effectively bricking the deployment.
+**GitHub:** https://github.com/Luke-Bradford/admin-it/issues/47
+**Problem:** `DELETE /api/setup` has no authentication — any unauthenticated user can destroy the deployment.
 **Acceptance criteria:**
-- `DELETE /api/setup` requires a valid JWT with `SystemAdmin` role
-- Consistent with the auth pattern used on other protected routes
-- Returns 401/403 appropriately
+- `DELETE /api/setup` requires valid JWT with `SystemAdmin` role
+- Returns `401`/`403` appropriately
 
 ---
 
-#### #5 — Fix ESLint configuration conflict
+#### #48 — Fix ESLint configuration conflict
 **Size:** S
-**Persona:** Engineer (DX)
-**Problem:** Two conflicting ESLint config files exist: `.eslintrc.json` (legacy) and `eslint.config.js` (ESLint 9 flat config). The `lint` script uses `--ext`, a legacy flag not supported by ESLint 9. The `--fix` flag in CI silently mutates files but never fails the build on violations.
+**GitHub:** https://github.com/Luke-Bradford/admin-it/issues/48
+**Problem:** Two conflicting ESLint configs (legacy `.eslintrc.json` + ESLint 9 flat `eslint.config.js`).
 **Acceptance criteria:**
-- Single ESLint config file (flat config `eslint.config.js` for ESLint 9)
-- `lint` script in `package.json` uses correct ESLint 9 invocation, no `--fix`
-- `format:check` script added (Prettier check, no auto-fix) for use in CI
-- `format` script (Prettier write) available for local use
-- CI `frontend-check.yml` updated to use the corrected scripts
-- `npm run lint` exits non-zero on any violation
+- `.eslintrc.json` deleted
+- `npm run lint` correct for ESLint 9, exits non-zero on violations
+- `npm run format:check` runs Prettier in check mode for CI
 
 ---
 
-#### #6 — Install Tailwind CSS (fix unstyled login page)
+#### #49 — Install Tailwind CSS
 **Size:** S
-**Persona:** End user (UX)
-**Problem:** `LoginPage.jsx` uses Tailwind class names throughout but Tailwind is not installed. The login page has no visible styling. This is the first thing every user sees.
+**GitHub:** https://github.com/Luke-Bradford/admin-it/issues/49
+**Problem:** All pages use Tailwind classes but Tailwind is not installed — UI completely unstyled.
 **Acceptance criteria:**
-- Tailwind CSS installed and configured (`tailwind.config.js`, `postcss.config.js`)
-- Login page renders correctly with intended styles
-- Dashboard and other pages using Tailwind classes also render correctly
-- No regressions in pages that use their own CSS files (`SetupPage.css`, `Header.css`)
+- `tailwindcss`, `postcss`, `autoprefixer` installed
+- `tailwind.config.js` and `postcss.config.js` created
+- All pages render with intended styles, no regressions
 
 ---
 
-#### #7 — Reconcile ORM models with deployed schema
+#### #50 — Reconcile ORM models and delete dead code
 **Size:** M
-**Persona:** Engineer (maintainability)
-**Problem:** `models.py` defines SQLAlchemy ORM models with integer PKs and different table names to the actual deployed schema (which uses UUIDs and different naming). `schema_manager.py` would generate incorrect DDL if ever called. Dead code (`init_core_schema.py`, `discovery.py` utils) adds confusion.
+**GitHub:** https://github.com/Luke-Bradford/admin-it/issues/50
+**Problem:** `models.py` is out of sync with the deployed schema. Multiple dead files add confusion.
 **Acceptance criteria:**
-- `models.py` updated to reflect the actual deployed schema (UUIDs, correct table/column names)
-- `init_core_schema.py` deleted (superseded by `spDeployCoreSchema.sql`)
-- `discovery.py` util deleted or consolidated into `discovery_routes.py`
-- `schema_manager.py` either wired up correctly or removed if not needed yet
+- `models.py`, `init_core_schema.py`, `discovery.py` (util), `OtherPage.jsx`, `HomePage.jsx` deleted
+- `pydantic<2.0.0` bumped to `pydantic>=2.0.0,<3.0.0`; any v1-specific syntax updated
+- All checks pass
+
+---
+
+#### #51 — Fix CORS hardcoded to localhost
+**Size:** S
+**GitHub:** https://github.com/Luke-Bradford/admin-it/issues/51
+**Problem:** `allow_origins=["http://localhost:3000"]` hardcoded — breaks in any non-local environment.
+**Acceptance criteria:**
+- CORS origins loaded from `CORS_ORIGINS` environment variable
+- `docker-compose.yml` and `.env.example` updated
+
+---
+
+#### #59 — Finalize Docker Compose setup
+**Size:** S
+**GitHub:** https://github.com/Luke-Bradford/admin-it/issues/59
+**Problem:** Docker setup not documented or environment-variable driven.
+**Acceptance criteria:**
+- All environment-specific config via env vars
+- `.env.example` documents every variable
+- README quickstart works on a fresh machine
 
 ---
 
@@ -143,57 +234,74 @@ Each ticket is sized S / M / L / XL (engineer-days of effort, roughly).
 
 ---
 
-#### #8 — Connection management UI (list, add, edit, delete)
-**Size:** L
-**Persona:** Admin
-**Problem:** There is no way to manage database connections from the UI. An engineer must manipulate the SQL Server schema directly.
-**Background:** The deployed schema has a `Connections` table (temporal, with full history). The setup wizard already knows how to create an engine from connection details — that pattern can be reused for testing new connections before saving.
-**Acceptance criteria:**
-- `GET /api/connections` — list connections the logged-in user has permission to see
-- `POST /api/connections` — create a new connection (Admin role required); validates and test-connects before saving
-- `PATCH /api/connections/{id}` — update connection details
-- `DELETE /api/connections/{id}` — soft-delete (set `IsActive = false`); SystemAdmin only
-- Frontend: Connections page with table, add/edit modal, delete confirmation
-- Connection credentials encrypted at rest (same Fernet pattern as core config, or per-connection key stored in `Secrets` table)
-
----
-
-#### #9 — User management UI (list, invite, edit roles, deactivate)
-**Size:** L
-**Persona:** Admin
-**Problem:** Users can only be created via the setup wizard (SystemAdmin only). There is no UI for managing users after initial setup.
-**Acceptance criteria:**
-- `GET /api/users` — list users (Admin role); includes role and active status
-- `POST /api/users` — create user with initial role (Admin role required)
-- `PATCH /api/users/{id}` — update role or active status
-- `DELETE /api/users/{id}` — deactivate (soft delete, `IsActive = false`); SystemAdmin only
-- Frontend: Users page with table, add user modal, inline role editor, deactivate action
-- Cannot deactivate yourself
-- Cannot demote the last SystemAdmin
-
----
-
-#### #10 — Role-based connection permissions
+#### #52 — App shell: sidebar navigation and layout
 **Size:** M
-**Persona:** Admin
-**Problem:** The schema has a `ConnectionPermissions` table (read/write/admin per connection per role), but no UI or API exposes it. All authenticated users effectively see all connections.
+**GitHub:** https://github.com/Luke-Bradford/admin-it/issues/52
+**Problem:** No navigation shell — every Phase 2+ page would be bolted onto a placeholder dashboard.
 **Acceptance criteria:**
-- `GET /api/connections/{id}/permissions` — list which roles have which access
-- `POST /api/connections/{id}/permissions` — grant a role access (Admin + connection admin required)
-- `DELETE /api/connections/{id}/permissions/{role_id}` — revoke access
-- Connection list API (`#8`) filters by the calling user's permissions
-- Frontend: Permissions tab on the connection edit modal
+- Persistent sidebar: Dashboard, Connections, Users, Audit Log (inactive items greyed until implemented)
+- Responsive — collapses to icons on narrow viewports
+- Breadcrumb component for nested routes
+- All protected pages use new layout
 
 ---
 
-#### #11 — User profile & password change
-**Size:** S
-**Persona:** End user
-**Problem:** Users cannot change their own password. The only way to update a password is direct database manipulation.
+#### #53 — Connection management API
+**Size:** M
+**GitHub:** https://github.com/Luke-Bradford/admin-it/issues/53
+**Problem:** No API to manage database connections.
+**Includes:** `CredentialSource` column on `Connections` table, Fernet-encrypted inline credentials.
 **Acceptance criteria:**
-- `POST /api/auth/change-password` — requires current password + new password; re-hashes with argon2id (#1 must be done first)
-- Frontend: Profile page or settings modal with password change form
-- Minimum password length enforced (12 chars)
+- `GET /api/connections` — filtered by user's `UserConnectionAccess`
+- `POST /api/connections` — Admin role; validates + test-connects before saving; credentials encrypted
+- `PATCH /api/connections/{id}` — Admin role
+- `DELETE /api/connections/{id}` — soft-delete; SystemAdmin only
+
+---
+
+#### #54 — Connection management UI
+**Size:** M
+**GitHub:** https://github.com/Luke-Bradford/admin-it/issues/54
+**Depends on:** #52, #53
+
+---
+
+#### #55 — User management API
+**Size:** M
+**GitHub:** https://github.com/Luke-Bradford/admin-it/issues/55
+**Problem:** No API to manage users after initial setup.
+**Acceptance criteria:**
+- `GET /api/users`, `POST /api/users`, `PATCH /api/users/{id}`, `DELETE /api/users/{id}`
+- Role checks: cannot deactivate self, cannot demote last SystemAdmin
+- Passwords hashed with argon2id (#44 dependency)
+
+---
+
+#### #56 — User management UI
+**Size:** M
+**GitHub:** https://github.com/Luke-Bradford/admin-it/issues/56
+**Depends on:** #52, #55
+
+---
+
+#### #57 — User profile page and password change
+**Size:** S
+**GitHub:** https://github.com/Luke-Bradford/admin-it/issues/57
+**Depends on:** #44
+
+---
+
+#### #58 — Role-based connection permissions (connection + table level)
+**Size:** M
+**GitHub:** https://github.com/Luke-Bradford/admin-it/issues/58
+**Includes:** Deploy `[adm].[TablePermissions]` table; API and UI for granting/revoking connection-level and table-level permissions.
+**Depends on:** #53, #54
+
+---
+
+#### #60 — Login hardening: rate limiting and account lockout
+**Size:** S
+**GitHub:** https://github.com/Luke-Bradford/admin-it/issues/60
 
 ---
 
@@ -203,56 +311,47 @@ Each ticket is sized S / M / L / XL (engineer-days of effort, roughly).
 
 #### #12 — Table browser (list schemas and tables)
 **Size:** M
-**Persona:** End user
-**Problem:** There is no way for a user to see what data is available in a connected database.
-**Background:** This requires querying `INFORMATION_SCHEMA` on the target connection, not the admin-it schema. A new class of "target connection" engine is needed, distinct from the core engine.
+**Problem:** No way to see what data is available in a connected database.
 **Acceptance criteria:**
-- `GET /api/connections/{id}/schemas` — list schemas on the target database
-- `GET /api/connections/{id}/schemas/{schema}/tables` — list tables with row counts and column summary
+- `GET /api/connections/{id}/schemas` — list schemas on target database
+- `GET /api/connections/{id}/schemas/{schema}/tables` — tables with row counts and column summary
 - `GET /api/connections/{id}/schemas/{schema}/tables/{table}/columns` — column names, types, nullability
-- User must have at least read permission on the connection
-- Frontend: Left-hand nav tree — connections → schemas → tables; clicking a table opens the data browser
+- User must have at least Read permission on the connection
+- Frontend: left-hand tree nav — connections → schemas → tables
 
 ---
 
-#### #13 — Data browser (paginated row view with column filtering)
+#### #13 — Data browser (paginated row view, filtering, inline editing)
 **Size:** L
-**Persona:** End user
-**Problem:** The core value of the product: let a non-technical user see and filter the data in a table without writing SQL.
+**Problem:** Core product value — let non-technical users see, filter, and (where permitted) edit data without SQL.
 **Acceptance criteria:**
-- `GET /api/connections/{id}/data/{schema}/{table}` — paginated rows (default 50/page), with optional column filter params
-- Filter params: column name + operator (equals, contains, starts with, is null, greater than, less than, between) + value — all validated server-side, never interpolated unsafely
+- `GET /api/connections/{id}/data/{schema}/{table}` — paginated rows with optional column filters
+- Filter operators: equals, contains, starts with, is null, greater than, less than, between
 - Sort by column (asc/desc)
-- Column visibility toggle (hide irrelevant columns)
-- Frontend: Data grid with pagination, column header sort/filter, column picker
-- Row count shown; total pages calculated
-- Loading state and empty state handled
+- Column visibility toggle
+- **Write access (where permitted):** inline row editing, add new row, delete row
+  - Write operations use `PUT /api/connections/{id}/data/{schema}/{table}/{pk}` (update), `POST` (insert), `DELETE` (delete)
+  - Permission check: resolve table-level override → fall back to connection-level
+  - Target DB constraint violations (NOT NULL, FK, etc.) caught and returned as clean user-facing errors — no raw SQL exceptions
+- Loading, empty, and error states handled
 
 ---
 
 #### #14 — Data export (CSV / Excel)
 **Size:** M
-**Persona:** End user + Power user
-**Problem:** Users need to take data away to use in reports or share with colleagues. Currently impossible.
 **Acceptance criteria:**
-- `GET /api/connections/{id}/data/{schema}/{table}/export` — same filter params as #13; returns CSV or XLSX (accept header or `?format=csv`)
-- Max export row limit (configurable, default 10,000) with clear UI warning when limit is hit
-- Export respects the same column filters as the browser view
-- Frontend: Export button in the data browser; format picker; progress indicator for large exports
-- Exports logged to audit trail (who exported what, when, row count)
+- Same filter params as #13; returns CSV or XLSX
+- Max export row limit (configurable, default 10,000) with UI warning when hit
+- Exports logged to audit trail
 
 ---
 
 #### #15 — Column-level data masking
 **Size:** M
-**Persona:** Admin + End user (compliance)
-**Problem:** Some columns contain sensitive data (PII, financial) that should not be visible to all users. Currently there is no way to restrict column-level visibility.
 **Acceptance criteria:**
-- Admin can mark columns as masked per-connection (stored in admin-it schema)
-- Masked columns shown as `****` in the data browser for users without elevated permission
+- Admin can mark columns as masked per connection
+- Masked columns shown as `****` for users without elevated permission
 - Masked columns excluded from exports for unprivileged users
-- Masking configuration accessible in the connection permissions UI (#10)
-- Audit trail records when a masked column is accessed by a privileged user
 
 ---
 
@@ -260,32 +359,14 @@ Each ticket is sized S / M / L / XL (engineer-days of effort, roughly).
 
 ---
 
-#### #16 — Saved query library (parameterised, no raw SQL for end users)
+#### #16 — Saved query library
 **Size:** XL
-**Persona:** Power user creates; End user runs
-**Problem:** Power users often need the same data filtered in different ways (e.g. "show me all orders for customer X in date range Y"). Today they either ask a developer to write a script or get raw database access. Neither is safe or efficient.
-**Background:** The pattern is: an engineer or power user writes a query with named parameters (`WHERE customer_id = :customer_id AND order_date BETWEEN :start_date AND :end_date`). Non-technical users see a form with labelled inputs, fill them in, and get results — never seeing the SQL.
-**Acceptance criteria:**
-- `POST /api/queries` — save a named, parameterised query with connection reference and parameter schema (name, type, label, required/optional, default)
-- `GET /api/queries` — list queries visible to the calling user
-- `POST /api/queries/{id}/run` — execute a saved query with supplied parameter values; parameters validated against schema before execution; only SELECT statements permitted
-- Frontend: Query library page; run panel shows a generated form from the parameter schema; results in data grid with export (#14 reused)
-- Power user / Admin can create and edit queries; End users can only run them
-- Query text is never exposed to End users in the UI
+**Problem:** Power users need parameterised queries; end users need to run them safely without seeing SQL.
 
 ---
 
 #### #17 — Query scheduling & email delivery
 **Size:** XL
-**Persona:** Power user
-**Problem:** Recurring reports (weekly sales, daily exceptions) require manual intervention today.
-**Acceptance criteria:**
-- Schedule a saved query (#16) to run on a cron schedule
-- Results delivered as CSV attachment to one or more email addresses
-- Email sending via configurable SMTP (admin-it system settings)
-- Schedule stored in admin-it schema; job runner executes on the backend (APScheduler or similar)
-- Failed runs logged; admin notified on consecutive failures
-- Frontend: Schedule tab on saved query editor
 
 ---
 
@@ -295,26 +376,11 @@ Each ticket is sized S / M / L / XL (engineer-days of effort, roughly).
 
 #### #18 — Audit log UI
 **Size:** M
-**Persona:** Admin + System admin
-**Problem:** The SQL Server temporal tables log all changes to the admin-it schema, but there is no way to view this history from the application. An engineer must query the DB directly.
-**Acceptance criteria:**
-- `GET /api/audit` — paginated audit log (who, what table, what action, before/after values, when)
-- Filter by user, table, date range, action type (INSERT/UPDATE/DELETE)
-- Frontend: Audit log page (Admin+ only); searchable, filterable table; expandable rows showing before/after JSON diff
-- Data query audit (from #13/#14/#16) also logged and surfaced here
 
 ---
 
 #### #19 — Login history & active sessions
 **Size:** S
-**Persona:** Admin
-**Problem:** No visibility into who has logged in, from where, or whether suspicious access has occurred.
-**Acceptance criteria:**
-- Login events logged (user, timestamp, IP address, success/failure)
-- `GET /api/users/{id}/login-history` — last N logins for a user (Admin or own user)
-- Account lockout after N consecutive failed logins (configurable, default 5)
-- Lockout can be cleared by Admin
-- Frontend: Login history tab on user detail page
 
 ---
 
@@ -324,37 +390,28 @@ Each ticket is sized S / M / L / XL (engineer-days of effort, roughly).
 
 #### #20 — Natural language query (AI → SQL → results)
 **Size:** XL
-**Persona:** End user
-**Problem:** Even with the data browser (#13), some questions don't fit a simple filter ("show me the top 10 customers by revenue last quarter where they haven't ordered in 30 days"). The end user is stuck.
-**Background:** The product already has the Claude API key pattern from the PR review workflow. The AI assistant uses the same API. The schema is always available (from #12). The safety model: AI generates a SELECT-only query, shown to the user for confirmation before execution, executed via the same parameterised engine — never DDL, never DML.
-**Acceptance criteria:**
-- User types a plain English question in the context of a table or connection
-- System sends the schema context + question to Claude; Claude returns a SQL SELECT query with explanation
-- Query shown to user before execution ("Here's what I'll run — does this look right?")
-- User confirms → query executed → results in data grid
-- If Claude cannot generate a safe query, it explains why rather than guessing
-- All AI-generated queries logged in audit trail with the original natural language prompt
-- Works only on connections the user has read access to
-- Generated SQL never contains DDL, DML, or stored procedure calls — validated server-side before execution
-- Frontend: AI chat panel that opens in context of the current table/connection
+**Safety model:** AI generates SELECT-only query, shown to user for confirmation before execution. Server-side validation rejects any DDL, DML, or stored procedure calls. All AI queries logged with original natural language prompt.
 
 ---
 
-## What we are explicitly not building (scope boundaries)
+## Scope boundaries
 
-- **Write access to target databases** — admin-it is read-only for end users. Engineers can write via SSMS or their own tools. The risk of a non-technical user accidentally mutating production data is unacceptable.
-- **Multi-database-vendor support** — SQL Server only, initially. The schema, temporal tables, and pyodbc driver choice are all SQL Server specific. PostgreSQL / MySQL support is a future phase.
-- **A general SQL IDE** — We are not building SSMS in the browser. Power users can use saved queries; raw SQL execution is not a first-class feature for end users.
-- **Row-level security on target databases** — Column masking (#15) is the extent of data restriction admin-it enforces. Row-level filtering based on the logged-in user's identity is not in scope.
+- **Write access to target databases:** Permitted and role-gated per table. The target database enforces all integrity constraints. admin-it enforces permission checks and surfaces clean error messages.
+- **Multi-database-vendor support:** SQL Server only initially. PostgreSQL/MySQL is a future phase.
+- **A general SQL IDE:** Not building SSMS in the browser. End users get a data browser and saved query runner. Raw SQL execution is not exposed to end users.
+- **Row-level security on target databases:** Not in scope. Column masking (#15) is the extent of admin-it's data restriction. Row-level filtering based on user identity is a future consideration.
+- **Config transfer between instances:** Not supported. Each admin-it instance is configured independently. Schema changes (DDL) are promoted via the idempotent deployment script.
 
 ---
 
-## Immediate next actions (in order)
+## Immediate next actions (Phase 1, in order)
 
-1. **#1 argon2id password hashing** — security, small, no dependencies
-2. **#2 startup crash fix** — blocks any reliable testing
-3. **#3 engine caching** — reliability, small
-4. **#4 protect delete endpoint** — security, trivial
-5. **#5 ESLint fix + #6 Tailwind** — unblock frontend development (CI will fail until these are fixed)
-6. **#7 reconcile ORM** — clear the dead code before building on top
-7. Then Phase 2 (connections + users) — the minimum for an engineer to hand off to a non-technical user
+1. **#47** — Protect `DELETE /api/setup` (security, 30 min)
+2. **#45** — Fix startup crash / lifespan migration (reliability, 2h)
+3. **#46** — Cache database engine (performance, 2h)
+4. **#44** — argon2id password hashing (security, 2h)
+5. **#48** — Fix ESLint config (DX, 1h)
+6. **#49** — Install Tailwind CSS (frontend, 1h)
+7. **#50** — Delete dead code, bump Pydantic v2 (tech debt, 3h)
+8. **#51** — Fix CORS (ops, 30 min)
+9. **#59** — Finalize Docker Compose (ops, 2h)

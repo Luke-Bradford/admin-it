@@ -23,10 +23,13 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
     except pyjwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
-    config, engine = get_config_and_engine()
+    try:
+        config, engine = get_config_and_engine()
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Service unavailable: setup not complete")
+
     schema = config.schema
 
-    # Fetch user info + roles from DB
     with engine.connect() as conn:
         result = conn.execute(
             text(f"""
@@ -48,7 +51,6 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
         if not is_active:
             raise HTTPException(status_code=403, detail="User is inactive")
 
-    # Return enriched user context
     return {
         "user_id": user_id,
         "username": username,
