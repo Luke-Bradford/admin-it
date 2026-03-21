@@ -39,7 +39,7 @@ def get_expected_objects() -> dict[str, list[str]]:
 
 def get_schema_changes(engine, schema: str) -> list[tuple]:
     """
-    Compare your ORM‑defined tables (from app.models.Base) to the actual DB schema 
+    Compare ORM-defined tables (from app.models.Base) to the actual DB schema
     and return a list of actions:
       ("create_table",  <Table>),
       ("add_column",    <Table>, <Column>),

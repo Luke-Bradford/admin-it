@@ -16,7 +16,9 @@ def test_tcp_connection(host: str, port: int, timeout: float = 2.0) -> bool:
         return False
 
 
-def get_databases(host: str, port: int, user: str, password: str, driver: str = "ODBC Driver 18 for SQL Server") -> List[str]:
+def get_databases(
+    host: str, port: int, user: str, password: str, driver: str = "ODBC Driver 18 for SQL Server"
+) -> List[str]:
     """
     Returns a list of databases accessible with the provided credentials.
     """

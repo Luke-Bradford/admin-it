@@ -40,8 +40,10 @@ def deploy_core_schema(engine: Engine, schema: str = 'adm') -> None:
         with open(SQL_FILE_PATH, 'r', encoding='utf-8') as file:
             sql_script = file.read()
 
-        # Inject schema parameter by simple replacement (safe since it's controlled input)
-        sql_script = sql_script.replace("DECLARE @SchemaName NVARCHAR(100) = 'changeme';", f"DECLARE @SchemaName NVARCHAR(100) = '{schema}';")
+        # Inject schema name by simple replacement (safe: schema comes from encrypted config, not user input)
+        placeholder = "DECLARE @SchemaName NVARCHAR(100) = 'changeme';"
+        replacement = f"DECLARE @SchemaName NVARCHAR(100) = '{schema}';"
+        sql_script = sql_script.replace(placeholder, replacement)
 
         with engine.begin() as conn:
             conn.execute(text(sql_script))
