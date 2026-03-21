@@ -149,6 +149,9 @@ def trigger_deploy_schema():
         deploy_core_schema(engine, schema=config.schema)
 
         # Reload JWT secret now that the schema (and Secrets table) exists.
+        # Imported here rather than at module top to avoid a circular import:
+        # setup_routes → settings → (nothing), but main.py imports both, and moving
+        # these to module level would require restructuring the app factory.
         from app import settings
         from app.db import fetch_secret
 

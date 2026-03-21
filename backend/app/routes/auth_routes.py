@@ -60,6 +60,7 @@ def login(request: LoginRequest):
 
     # Step 2: migrate legacy SHA-256 hash to argon2id in its own committed transaction.
     # Isolated so a later failure cannot silently drop the upgrade.
+    # For users already on argon2id, needs_rehash() returns False and this block is skipped.
     if needs_rehash(stored_hash):
         new_hash = hash_password(request.password)
         with engine.begin() as conn:

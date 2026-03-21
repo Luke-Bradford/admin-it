@@ -52,6 +52,20 @@ def verify_password(password: str, stored_hash: str, legacy_salt: str | None = N
         return hmac.compare_digest(candidate, stored_hash)
 
 
+_SHA256_HEX_LENGTH = 64
+_SHA256_HEX_CHARS = frozenset("0123456789abcdef")
+
+
 def needs_rehash(stored_hash: str) -> bool:
-    """Return True if the stored hash is legacy (SHA-256) and should be upgraded to argon2id."""
-    return not stored_hash.startswith(_ARGON2_PREFIX)
+    """
+    Return True only if the stored hash is a plausible legacy SHA-256 hash that should
+    be upgraded to argon2id.
+
+    A plausible SHA-256 hash is exactly 64 lowercase hex characters. Anything else
+    (empty string, argon2id hash, corrupted value) returns False — we let
+    verify_password() fail for unrecognised formats rather than triggering a rehash
+    that would silently overwrite a corrupted record.
+    """
+    if stored_hash.startswith(_ARGON2_PREFIX):
+        return False
+    return len(stored_hash) == _SHA256_HEX_LENGTH and all(c in _SHA256_HEX_CHARS for c in stored_hash)
