@@ -1,17 +1,5 @@
 # admin-it — Claude Code Instructions
 
-## Branch and PR workflow — non-negotiable
-
-1. **Create a branch before writing any code.** Never commit to `main` directly.
-   Naming: `feature/<issue-number>-short-description` or `fix/<issue-number>-short-description`.
-2. **All commits go on the branch.** If a commit lands on `main` by mistake, stop and fix — do not branch after the fact.
-3. **Push branch → open PR → wait for Claude review to run.**
-4. **Address every review comment** on the same branch. Reply to each with what was done + commit SHA.
-5. **Re-run all checks** (lint, format, ruff) before pushing the follow-up commit.
-6. **Merge only after PR is approved. Delete the branch after merge.**
-
----
-
 ## Pre-PR checklist (run before raising a PR)
 
 Before pushing a branch or creating a PR, verify all of these pass locally:
@@ -37,6 +25,7 @@ If format check fails, run `ruff format .` to auto-fix, then re-check.
 ## Known CI gotchas
 
 - **Backend `ruff.toml`** sets `line-length = 120`. New code should stay under 120 chars.
+- **`backend/app/database/init_core_schema.py`** is excluded from ruff (dead code pending deletion in ticket #7). Do not add new code to it.
 - **CRLF line endings** on Windows will trigger LF warnings from Git — these are cosmetic and do not affect CI.
 - **Claude review workflow** uses `claude-sonnet-4-6` (not opus) to keep costs down.
 
@@ -53,7 +42,7 @@ If format check fails, run `ruff format .` to auto-fix, then re-check.
 
 ## Stack notes
 
-- **Backend:** Python 3.11, FastAPI, SQLAlchemy (raw `text()` queries — no ORM for runtime queries), Pydantic v2, pyodbc for MSSQL
+- **Backend:** Python 3.11, FastAPI, SQLAlchemy (raw `text()` queries — no ORM for runtime queries), Pydantic v1, pyodbc for MSSQL
 - **Frontend:** React 19, Vite, React Router v6, plain `fetch` (no axios despite it being installed)
 - **Database:** SQL Server only. Temporal tables used for all audit history in the core schema.
 - **Auth:** JWT HS256, stored in localStorage. Secret loaded from `[adm].[Secrets]` at startup into `settings.JWT_SECRET`.
