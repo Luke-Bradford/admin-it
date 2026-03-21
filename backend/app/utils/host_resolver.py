@@ -2,7 +2,6 @@
 
 import socket
 import os
-import logging
 
 def is_running_in_docker() -> bool:
     try:

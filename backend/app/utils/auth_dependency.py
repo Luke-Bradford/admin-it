@@ -6,7 +6,6 @@ from sqlalchemy import text
 import jwt as pyjwt
 
 from app.utils.db_helpers import get_config_and_engine
-from app.db import fetch_secret
 from app import settings
 
 security = HTTPBearer()

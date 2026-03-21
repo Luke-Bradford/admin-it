@@ -6,7 +6,6 @@ from app.utils.host_resolver import resolve_hostname
 
 def get_config_and_engine():
     core = load_core_config()
-    use_docker_alias = core.get("use_localhost_alias", False)
 
     # Resolve hostname only at runtime, leave saved config untouched
     resolved_host = resolve_hostname(

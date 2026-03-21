@@ -6,7 +6,7 @@ from app.routes.setup_routes import router as setup_router
 from app.routes.discovery_routes import router as discovery_router
 from app.routes.auth_routes import router as auth_router
 from app import settings
-from app.db import DatabaseConfig, get_engine, fetch_secret
+from app.db import fetch_secret
 from app.utils.db_helpers import get_config_and_engine
 from app.routes.manage_routes import router as manage_router
 from app.utils.secure_config import core_config_exists

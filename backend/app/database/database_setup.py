@@ -5,8 +5,6 @@ from sqlalchemy import text, inspect
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.engine import Engine
 
-from app.db import DatabaseConfig, get_engine, test_connection
-from app.utils.secure_config import load_core_config
 import traceback
 
 SQL_FILE_PATH = os.path.join(os.path.dirname(__file__), '../sql/spDeployCoreSchema.sql')

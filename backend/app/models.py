@@ -1,16 +1,18 @@
 # backend/app/models.py
+# NOTE: These ORM models are out of sync with the deployed schema (spDeployCoreSchema.sql).
+# The deployed schema uses UUIDs as PKs and different table names.
+# Tracked for cleanup in ticket #7 (reconcile ORM models with deployed schema).
 
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Text
 from sqlalchemy.orm import declarative_base, relationship
 
-# Declare your ORM base here — only once!
 Base = declarative_base()
 
 
 class CoreConnection(Base):
     __tablename__ = "CoreConnections"
-    __table_args__ = {"schema": None}  # we'll format schema in DDL scripts
+    __table_args__ = {"schema": None}
 
     Id           = Column(Integer, primary_key=True, autoincrement=True)
     Name         = Column(String(100), nullable=False, unique=True)
