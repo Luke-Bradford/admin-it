@@ -1,6 +1,6 @@
 # backend/app/routes/auth_routes.py
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import jwt as pyjwt  # PyJWT
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -38,7 +38,8 @@ def login(request: LoginRequest):
     config, engine = get_config_and_engine()
     schema = config.schema
 
-    with engine.begin() as conn:
+    # Step 1: fetch user and verify password (read-only connection).
+    with engine.connect() as conn:
         user_result = conn.execute(
             text(f"""
             SELECT u.UserId, u.Username, u.PasswordHash, us.Salt
@@ -57,9 +58,11 @@ def login(request: LoginRequest):
         if not verify_password(request.password, stored_hash, legacy_salt=salt):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password.")
 
-        # Transparent migration: re-hash with argon2id if still on legacy SHA-256.
-        if needs_rehash(stored_hash):
-            new_hash = hash_password(request.password)
+    # Step 2: migrate legacy SHA-256 hash to argon2id in its own committed transaction.
+    # Isolated so a later failure cannot silently drop the upgrade.
+    if needs_rehash(stored_hash):
+        new_hash = hash_password(request.password)
+        with engine.begin() as conn:
             conn.execute(
                 text(f"""
                 UPDATE [{schema}].[Users]
@@ -69,6 +72,8 @@ def login(request: LoginRequest):
                 {"new_hash": new_hash, "uid": user_id},
             )
 
+    # Step 3: fetch roles (read-only connection).
+    with engine.connect() as conn:
         roles_result = conn.execute(
             text(f"""
             SELECT r.RoleName
@@ -83,7 +88,7 @@ def login(request: LoginRequest):
 
     jwt_secret = fetch_secret(engine, schema, "JWT_SECRET")
     expires_delta = timedelta(hours=settings.JWT_EXPIRES_HOURS)
-    expire_time = datetime.utcnow() + expires_delta
+    expire_time = datetime.now(timezone.utc) + expires_delta
     payload = {
         "sub": str(user_id),
         "username": username,

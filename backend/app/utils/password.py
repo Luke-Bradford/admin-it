@@ -3,17 +3,20 @@
 # Single source of truth for password hashing and verification.
 #
 # Hash format:
-#   New hashes — argon2id via argon2-cffi. Stored in PasswordHash column.
-#   Legacy hashes — SHA-256(password + salt), stored as 64-char hex string.
-#     Salt stored separately in UserSecrets.Salt.
+#   New hashes  — argon2id via argon2-cffi. The full hash string is stored in
+#                 PasswordHash; no separate salt column is needed (argon2id embeds
+#                 its own salt in the hash string).
+#   Legacy hashes — SHA-256(password + salt), stored as a 64-char hex string.
+#                   Salt stored separately in UserSecrets.Salt.
 #
-# Migration: on successful login with a legacy hash, re-hash with argon2id
-# and update the stored hash. Transparent to the user.
+# Migration is the caller's responsibility: call needs_rehash() after a successful
+# verify_password(); if True, call hash_password() and persist the new hash.
 
 import hashlib
+import hmac
 
 from argon2 import PasswordHasher
-from argon2.exceptions import VerificationError, VerifyMismatchError
+from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 
 _ph = PasswordHasher()
 
@@ -22,7 +25,7 @@ _ARGON2_PREFIX = "$argon2id$"
 
 
 def hash_password(password: str) -> str:
-    """Hash a new password with argon2id. Returns the full hash string (no separate salt needed)."""
+    """Hash a new password with argon2id. Returns the full hash string."""
     return _ph.hash(password)
 
 
@@ -31,20 +34,22 @@ def verify_password(password: str, stored_hash: str, legacy_salt: str | None = N
     Verify a password against a stored hash.
 
     Supports both argon2id (new) and SHA-256+salt (legacy) formats.
-    Returns True if the password matches.
+    Returns True if the password matches, False otherwise.
+    Never raises — a corrupted or unrecognised hash returns False.
     """
     if stored_hash.startswith(_ARGON2_PREFIX):
         try:
             _ph.verify(stored_hash, password)
             return True
-        except (VerifyMismatchError, VerificationError):
+        except (VerifyMismatchError, VerificationError, InvalidHashError):
             return False
     else:
         # Legacy SHA-256 path — requires the salt from UserSecrets.
         if legacy_salt is None:
             return False
-        legacy_hash = hashlib.sha256((password + legacy_salt).encode("utf-8")).hexdigest()
-        return legacy_hash == stored_hash
+        candidate = hashlib.sha256((password + legacy_salt).encode("utf-8")).hexdigest()
+        # Use hmac.compare_digest to prevent timing oracle attacks.
+        return hmac.compare_digest(candidate, stored_hash)
 
 
 def needs_rehash(stored_hash: str) -> bool:

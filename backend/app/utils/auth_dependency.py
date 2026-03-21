@@ -12,6 +12,9 @@ security = HTTPBearer()
 
 
 def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    if settings.JWT_SECRET is None:
+        raise HTTPException(status_code=503, detail="Service unavailable: setup not complete")
+
     token = credentials.credentials
     try:
         payload = pyjwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])

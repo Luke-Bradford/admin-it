@@ -29,9 +29,12 @@ async def lifespan(app: FastAPI):
             print("[startup] Engine initialised and JWT secret loaded.")
         except Exception as e:
             # Log but do not crash — setup routes must remain reachable.
+            # JWT_SECRET stays None; verify_token will return 503 for any auth attempt.
             print(f"[startup] Could not initialise engine or load JWT secret: {e}")
+            settings.JWT_SECRET = None
     else:
         print("[startup] No config file found. Starting in setup mode.")
+        settings.JWT_SECRET = None
 
     yield
     # Shutdown — nothing to clean up currently.
