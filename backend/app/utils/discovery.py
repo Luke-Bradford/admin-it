@@ -1,8 +1,9 @@
 # app/utils/discovery.py
 
 import socket
-import pyodbc
 from typing import List
+
+import pyodbc
 
 
 def test_tcp_connection(host: str, port: int, timeout: float = 2.0) -> bool:

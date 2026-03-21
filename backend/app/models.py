@@ -4,7 +4,8 @@
 # Tracked for cleanup in ticket #7 (reconcile ORM models with deployed schema).
 
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Text
+
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()

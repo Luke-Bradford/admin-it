@@ -2,9 +2,10 @@
 
 import os
 from urllib.parse import quote_plus
-from sqlalchemy import create_engine, MetaData
-from sqlalchemy.exc import SQLAlchemyError
+
+from sqlalchemy import MetaData, create_engine
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.sql import text
 

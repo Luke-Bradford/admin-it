@@ -191,7 +191,7 @@ Each ticket is sized S / M / L / XL (engineer-days of effort, roughly).
 **Persona:** End user
 **Problem:** Users cannot change their own password. The only way to update a password is direct database manipulation.
 **Acceptance criteria:**
-- `POST /api/auth/change-password` — requires current password + new password; re-hashes with bcrypt (#1 must be done first)
+- `POST /api/auth/change-password` — requires current password + new password; re-hashes with argon2id (#1 must be done first)
 - Frontend: Profile page or settings modal with password change form
 - Minimum password length enforced (12 chars)
 
@@ -351,7 +351,7 @@ Each ticket is sized S / M / L / XL (engineer-days of effort, roughly).
 
 ## Immediate next actions (in order)
 
-1. **#1 bcrypt** — security, small, no dependencies
+1. **#1 argon2id password hashing** — security, small, no dependencies
 2. **#2 startup crash fix** — blocks any reliable testing
 3. **#3 engine caching** — reliability, small
 4. **#4 protect delete endpoint** — security, trivial

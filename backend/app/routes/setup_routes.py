@@ -1,29 +1,30 @@
 # app/routes/setup_routes.py
 
-import traceback
+import hashlib
 import logging
 import os
+import traceback
 import uuid
-import hashlib
 from datetime import datetime
 from pathlib import Path
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+
 import pyodbc
 from cryptography.fernet import Fernet, InvalidToken
 from dotenv import load_dotenv
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 
-from app.utils.secure_config import (
-    save_core_config,
-    load_core_config,
-    core_config_exists,
-    delete_core_config,
-)
-from app.database.database_setup import is_core_schema_deployed, deploy_core_schema
+from app.database.database_setup import deploy_core_schema, is_core_schema_deployed
 from app.utils.db_helpers import get_config_and_engine
 from app.utils.host_resolver import resolve_hostname
+from app.utils.secure_config import (
+    core_config_exists,
+    delete_core_config,
+    load_core_config,
+    save_core_config,
+)
 
 router = APIRouter()
 

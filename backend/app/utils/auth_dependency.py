@@ -1,12 +1,12 @@
 # backend/app/utils/auth_dependency.py
 
-from fastapi import Depends, HTTPException
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy import text
 import jwt as pyjwt
+from fastapi import Depends, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import text
 
-from app.utils.db_helpers import get_config_and_engine
 from app import settings
+from app.utils.db_helpers import get_config_and_engine
 
 security = HTTPBearer()
 

@@ -1,11 +1,13 @@
 # app/routes/discovery_routes.py
 
+import logging
+import socket
+
+import pyodbc
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+
 from app.utils.host_resolver import resolve_hostname
-import pyodbc
-import socket
-import logging
 
 router = APIRouter()
 

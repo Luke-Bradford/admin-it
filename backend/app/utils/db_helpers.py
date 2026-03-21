@@ -1,8 +1,8 @@
 # app/utils/db_helpers.py
 
-from app.utils.secure_config import load_core_config
 from app.db import DatabaseConfig, get_engine
 from app.utils.host_resolver import resolve_hostname
+from app.utils.secure_config import load_core_config
 
 
 def get_config_and_engine():

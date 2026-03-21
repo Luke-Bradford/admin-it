@@ -1,6 +1,7 @@
 # backend/app/utils/schema_manager.py
 
 from pathlib import Path
+
 from sqlalchemy import inspect
 from sqlalchemy.schema import DDL
 

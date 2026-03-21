@@ -1,7 +1,7 @@
 # app/utils/host_resolver.py
 
-import socket
 import os
+import socket
 
 
 def is_running_in_docker() -> bool:

@@ -1,16 +1,17 @@
 # backend/app/routes/auth_routes.py
 
-from fastapi import APIRouter, HTTPException, status, Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+import hashlib
+from datetime import datetime, timedelta
+
+import jwt as pyjwt  # PyJWT
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 from sqlalchemy import text
-from datetime import datetime, timedelta
-import jwt as pyjwt  # PyJWT
-import hashlib
 
 from app import settings
-from app.utils.db_helpers import get_config_and_engine
 from app.db import fetch_secret
+from app.utils.db_helpers import get_config_and_engine
 
 router = APIRouter()
 security = HTTPBearer()

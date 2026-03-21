@@ -1,11 +1,10 @@
 import logging
 import os
-
-from sqlalchemy import text, inspect
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.engine import Engine
-
 import traceback
+
+from sqlalchemy import inspect, text
+from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
 
 SQL_FILE_PATH = os.path.join(os.path.dirname(__file__), "../sql/spDeployCoreSchema.sql")
 

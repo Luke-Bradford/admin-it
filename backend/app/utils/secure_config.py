@@ -1,10 +1,11 @@
 # backend/app/utils/secure_config.py
 
-import os
 import json
+import os
 from pathlib import Path
-from dotenv import load_dotenv
+
 from cryptography.fernet import Fernet
+from dotenv import load_dotenv
 
 # .env lives at backend/.env
 ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
