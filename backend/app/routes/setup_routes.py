@@ -1,23 +1,21 @@
 # app/routes/setup_routes.py
 
-import hashlib
 import logging
 import os
-import traceback
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pyodbc
 from cryptography.fernet import Fernet, InvalidToken
 from dotenv import load_dotenv
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from app.database.database_setup import deploy_core_schema, is_core_schema_deployed
-from app.utils.db_helpers import get_config_and_engine
+from app.utils.auth_dependency import verify_token
 from app.utils.host_resolver import resolve_hostname
 from app.utils.secure_config import (
     core_config_exists,
@@ -27,6 +25,7 @@ from app.utils.secure_config import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 # Generate a Fernet key for encrypting core config if not present
 ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
@@ -51,11 +50,9 @@ class ConnDetails(BaseModel):
     db_name: str
     db_schema: str = Field("adm", alias="schema")
     odbc_driver: str = Field("ODBC Driver 17 for SQL Server", alias="odbc_driver")
-    use_localhost_alias: bool = False  # ← Added to enable Docker host resolution
+    use_localhost_alias: bool = False
 
-    class Config:
-        allow_population_by_alias = True
-        allow_population_by_field_name = True
+    model_config = {"populate_by_name": True}
 
 
 class AdminUserInput(BaseModel):
@@ -66,11 +63,9 @@ class AdminUserInput(BaseModel):
 
 @router.post("/test-connection")
 async def test_connection(details: ConnDetails):
-    # Resolve host — especially for Docker environments using host.docker.internal
     resolved_host = resolve_hostname(details.db_host, use_localhost_alias=details.use_localhost_alias)
-    print(f"[test-connection] Using resolved host: {resolved_host}")
+    logger.debug("[test-connection] Using resolved host: %s", resolved_host)
 
-    # Build connection string
     cs = (
         f"DRIVER={{{details.odbc_driver}}};"
         f"SERVER={resolved_host},{details.db_port};"
@@ -89,11 +84,17 @@ async def test_connection(details: ConnDetails):
 
 @router.post("")
 async def setup(details: ConnDetails):
-    # Test DB connectivity before saving config
     await test_connection(details)
 
-    raw = details.dict(by_alias=True)
+    raw = details.model_dump(by_alias=True)
     save_core_config(raw)
+
+    # Reinitialise the engine singleton so protected routes pick up the new config
+    # without requiring a server restart. Deferred import avoids a circular import:
+    # setup_routes is imported by main.py before db_helpers is fully initialised.
+    from app.utils.db_helpers import init_engine  # noqa: PLC0415
+
+    init_engine()
 
     masked = raw.copy()
     masked["db_password"] = "*" * len(raw["db_password"])
@@ -114,7 +115,10 @@ async def get_setup():
 
 
 @router.delete("")
-async def delete_setup():
+async def delete_setup(_user: dict = Depends(verify_token)):
+    """Delete the core config. Requires a valid JWT with SystemAdmin role."""
+    if "SystemAdmin" not in _user.get("roles", []):
+        raise HTTPException(status_code=403, detail="SystemAdmin role required")
     delete_core_config()
     return {"configured": False, "status": "success", "message": "Deleted."}
 
@@ -122,18 +126,22 @@ async def delete_setup():
 @router.get("/deploy-status")
 def check_deploy_status():
     try:
+        # Deferred import: db_helpers singleton may not be initialised yet on fresh install.
+        from app.utils.db_helpers import get_config_and_engine  # noqa: PLC0415
+
         config, engine = get_config_and_engine()
         deployed = is_core_schema_deployed(engine, schema=config.schema)
         return {"deployed": deployed}
     except Exception as e:
-        logging.error(f"Error checking deployment status: {str(e)}")
-        logging.error(traceback.format_exc())
+        logging.error("Error checking deployment status: %s", str(e))
         raise HTTPException(status_code=500, detail="Failed to determine deployment status")
 
 
 @router.post("/deploy-schema")
 def trigger_deploy_schema():
     try:
+        from app.utils.db_helpers import get_config_and_engine  # noqa: PLC0415
+
         config, engine = get_config_and_engine()
 
         if is_core_schema_deployed(engine, schema=config.schema):
@@ -148,11 +156,13 @@ def trigger_deploy_schema():
 @router.post("/create-admin")
 def create_admin_user(user: AdminUserInput):
     try:
+        from app.utils.db_helpers import get_config_and_engine  # noqa: PLC0415
+        from app.utils.password import hash_password  # noqa: PLC0415
+
         config, engine = get_config_and_engine()
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         with engine.begin() as conn:
-            # Prevent duplicate SystemAdmin users
             existing = conn.execute(
                 text(f"""
                 SELECT COUNT(*)
@@ -174,10 +184,10 @@ def create_admin_user(user: AdminUserInput):
                 raise HTTPException(status_code=500, detail="SystemAdmin role not found.")
 
             user_id = str(uuid.uuid4())
-            salt = os.urandom(16).hex()
-            hashed = hashlib.sha256((user.password + salt).encode()).hexdigest()
+            # argon2id hash — salt is embedded in the hash string; UserSecrets.Salt
+            # is set to an empty string as a sentinel for the argon2id path.
+            hashed = hash_password(user.password)
 
-            # Insert User
             conn.execute(
                 text(f"""
                 INSERT INTO [{config.schema}].[Users] (
@@ -191,7 +201,6 @@ def create_admin_user(user: AdminUserInput):
                 dict(uid=user_id, username=user.username, email=user.email, phash=hashed, now=now),
             )
 
-            # Insert Secret
             conn.execute(
                 text(f"""
                 INSERT INTO [{config.schema}].[UserSecrets] (
@@ -202,10 +211,9 @@ def create_admin_user(user: AdminUserInput):
                     NULL, :now, NULL, :now
                 )
             """),
-                dict(sid=str(uuid.uuid4()), uid=user_id, salt=salt, now=now),
+                dict(sid=str(uuid.uuid4()), uid=user_id, salt="", now=now),
             )
 
-            # Insert Role Mapping
             conn.execute(
                 text(f"""
                 INSERT INTO [{config.schema}].[UserRoles] (
@@ -231,6 +239,8 @@ def create_admin_user(user: AdminUserInput):
 @router.get("/admin-status")
 def check_admin_user_present():
     try:
+        from app.utils.db_helpers import get_config_and_engine  # noqa: PLC0415
+
         config, engine = get_config_and_engine()
         schema = config.schema
         with engine.connect() as conn:

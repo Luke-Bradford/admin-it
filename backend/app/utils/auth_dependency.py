@@ -12,6 +12,9 @@ security = HTTPBearer()
 
 
 def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    if settings.JWT_SECRET is None:
+        raise HTTPException(status_code=503, detail="Service unavailable: setup not complete")
+
     token = credentials.credentials
     try:
         payload = pyjwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
@@ -23,7 +26,11 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
     except pyjwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
-    config, engine = get_config_and_engine()
+    try:
+        config, engine = get_config_and_engine()
+    except RuntimeError:
+        raise HTTPException(status_code=503, detail="Service unavailable: setup not complete")
+
     schema = config.schema
 
     # Fetch user info + roles from DB
