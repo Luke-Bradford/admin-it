@@ -8,7 +8,7 @@ on:
 
 jobs:
   frontend:
-    name: Frontend — lint & typecheck
+    name: Frontend — lint & format
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -34,7 +34,7 @@ jobs:
         run: npm run format:check
 
   backend:
-    name: Backend — lint & typecheck
+    name: Backend — lint & format
     runs-on: ubuntu-latest
     defaults:
       run:

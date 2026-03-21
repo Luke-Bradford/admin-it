@@ -54,15 +54,15 @@ Each ticket is sized S / M / L / XL (engineer-days of effort, roughly).
 
 ---
 
-#### #1 — Fix password hashing (SHA-256 → bcrypt)
+#### #1 — Fix password hashing (SHA-256 → argon2id)
 **Size:** S
 **Persona:** System admin (security)
 **Problem:** Passwords are hashed with SHA-256 + salt. SHA-256 is fast by design, making it trivially brute-forceable with modern hardware. Any credential leak exposes all passwords.
 **Acceptance criteria:**
-- Passwords stored using `bcrypt` (or `argon2id`) with a work factor appropriate for self-hosted deployment
+- Passwords stored using `argon2id` (via `argon2-cffi`) — preferred over bcrypt as it is memory-hard and the current OWASP recommendation
 - Existing SHA-256 hashes migrated on next login (re-hash on successful password verify)
 - No visible change to end users
-- `requirements.txt` updated; `bcrypt` or `argon2-cffi` added
+- `requirements.txt` updated with `argon2-cffi`
 
 ---
 

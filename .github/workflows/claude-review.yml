@@ -19,39 +19,45 @@ jobs:
           fetch-depth: 0
 
       - name: Get PR diff
-        run: gh pr diff ${{ github.event.pull_request.number }} > pr.diff
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: gh pr diff "$PR_NUMBER" > pr.diff
 
       - name: Get PR description
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          gh pr view ${{ github.event.pull_request.number }} \
+          gh pr view "$PR_NUMBER" \
             --json title,body \
             -q '"# " + .title + "\n\n" + .body' > pr_desc.txt
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Get PR comments
-        run: |
-          gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
-            --jq '[.[] | "### Comment by " + .user.login + " at " + .created_at + "\n" + .body] | join("\n\n---\n\n")' \
-            > pr_comments.txt
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh api "repos/$REPO/issues/$PR_NUMBER/comments" \
+            --jq '[.[] | "### Comment by " + .user.login + " at " + .created_at + "\n" + .body] | join("\n\n---\n\n")' \
+            > pr_comments.txt
 
       - name: Get linked issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
         run: |
-          ISSUE_NUM=$(gh pr view ${{ github.event.pull_request.number }} --json body -q '.body' \
+          ISSUE_NUM=$(gh pr view "$PR_NUMBER" --json body -q '.body' \
             | grep -oP '(?<=Closes #|closes #|Fixes #|fixes #|Resolves #|resolves #)\d+' | head -1)
           if [ -n "$ISSUE_NUM" ]; then
-            gh issue view "$ISSUE_NUM" --repo ${{ github.repository }} \
+            gh issue view "$ISSUE_NUM" --repo "$REPO" \
               --json number,title,body -q '"# Issue #" + (.number | tostring) + ": " + .title + "\n\n" + .body' \
               > linked_issue.txt 2>/dev/null || echo "(issue not found)" > linked_issue.txt
           else
             echo "(no linked issue found in PR body)" > linked_issue.txt
           fi
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build request body
         run: |
@@ -175,10 +181,9 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
       - name: Post review comment
-        run: |
-          gh pr comment ${{ github.event.pull_request.number }} \
-            --body "## Claude Code Review
-
-          $(cat review.txt)"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          { echo "## Claude Code Review"; echo ""; cat review.txt; } > comment_body.txt
+          gh pr comment "$PR_NUMBER" --body-file comment_body.txt

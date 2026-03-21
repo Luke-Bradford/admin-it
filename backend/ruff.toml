@@ -2,8 +2,3 @@ line-length = 120
 
 [lint]
 select = ["E", "F", "W"]
-
-# Dead code files pending removal (ticket #7 - reconcile ORM models with deployed schema)
-exclude = [
-    "app/database/init_core_schema.py",
-]
