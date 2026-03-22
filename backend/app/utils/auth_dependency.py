@@ -11,11 +11,16 @@ from app.utils.db_helpers import get_config_and_engine
 security = HTTPBearer()
 
 
-def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
+def verify_token_string(token: str) -> dict:
+    """Validate a raw JWT string and return the enriched user context dict.
+
+    Raises HTTPException on any auth failure. Extracted so it can be called
+    directly (e.g. from route handlers that manage their own credential wiring)
+    without going through FastAPI dependency injection.
+    """
     if settings.JWT_SECRET is None:
         raise HTTPException(status_code=503, detail="Service unavailable: setup not complete")
 
-    token = credentials.credentials
     try:
         payload = pyjwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
         user_id = payload.get("sub")
@@ -55,9 +60,13 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
         if not is_active:
             raise HTTPException(status_code=403, detail="User is inactive")
 
-    # Return enriched user context
     return {
         "user_id": user_id,
         "username": username,
         "roles": roles,
     }
+
+
+def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+    """FastAPI dependency wrapper around verify_token_string."""
+    return verify_token_string(credentials.credentials)
