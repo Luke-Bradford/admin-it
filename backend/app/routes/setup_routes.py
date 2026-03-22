@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from app.database.database_setup import deploy_core_schema, is_core_schema_deployed
-from app.utils.auth_dependency import verify_token
+from app.utils.auth_dependency import verify_token, verify_token_string
 from app.utils.host_resolver import resolve_hostname
 from app.utils.secure_config import (
     core_config_exists,
@@ -94,7 +94,7 @@ async def setup(
         # System is already configured — require a SystemAdmin JWT to overwrite.
         if credentials is None:
             raise HTTPException(status_code=401, detail="Authorization required to reconfigure a configured system")
-        user = verify_token(credentials)
+        user = verify_token_string(credentials.credentials)
         if "SystemAdmin" not in user.get("roles", []):
             raise HTTPException(status_code=403, detail="SystemAdmin role required")
 
