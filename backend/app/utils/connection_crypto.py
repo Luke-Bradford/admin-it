@@ -10,7 +10,7 @@
 import json
 import logging
 
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 from fastapi import HTTPException
 from sqlalchemy.engine import Engine
 
@@ -37,4 +37,14 @@ def encrypt_credentials(engine: Engine, schema: str, credentials: dict) -> str:
 def decrypt_credentials(engine: Engine, schema: str, token: str) -> dict:
     """Decrypt a stored Fernet token and return the credentials dict."""
     f = _get_fernet(engine, schema)
-    return json.loads(f.decrypt(token.encode("utf-8")).decode("utf-8"))
+    try:
+        return json.loads(f.decrypt(token.encode("utf-8")).decode("utf-8"))
+    except InvalidToken:
+        logger.error(
+            "[connection_crypto] Failed to decrypt ConnectionString — "
+            "token may be corrupt or was encrypted with a different key"
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Server configuration error: could not decrypt connection credentials",
+        )

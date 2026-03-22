@@ -280,14 +280,14 @@ def update_connection(
     new_encrypted = encrypt_credentials(engine, schema, updated_creds)
 
     with engine.begin() as conn:
-        conn.execute(
+        result = conn.execute(
             text(f"""
                 UPDATE [{schema}].[Connections]
                 SET Name = :name,
                     ConnectionString = :cs,
                     ModifiedById = :uid,
                     ModifiedDate = :now
-                WHERE ConnectionId = :cid
+                WHERE ConnectionId = :cid AND IsActive = 1
             """),
             {
                 "name": new_name,
@@ -297,6 +297,8 @@ def update_connection(
                 "cid": cid,
             },
         )
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Connection not found")
 
     return {"id": cid, "name": new_name}
 
