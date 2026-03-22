@@ -18,6 +18,13 @@ logger = logging.getLogger(__name__)
 
 ADMIN_ROLES = {"Admin", "SystemAdmin"}
 
+# Allowlist of supported ODBC drivers. User input is validated against this
+# before being interpolated into the connection string.
+ALLOWED_ODBC_DRIVERS = {
+    "ODBC Driver 17 for SQL Server",
+    "ODBC Driver 18 for SQL Server",
+}
+
 
 # ---------------------------------------------------------------------------
 # Request / response models
@@ -59,9 +66,18 @@ def _require_system_admin(user: dict) -> None:
         raise HTTPException(status_code=403, detail="SystemAdmin role required")
 
 
+def _validate_driver(driver: str) -> None:
+    if driver not in ALLOWED_ODBC_DRIVERS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported ODBC driver. Allowed: {sorted(ALLOWED_ODBC_DRIVERS)}",
+        )
+
+
 def _test_pyodbc(creds: dict) -> None:
-    """Attempt a live pyodbc connection with the given credentials. Raises 400 on failure."""
+    """Attempt a live pyodbc connection. Raises 400 on failure (generic message, detail logged)."""
     driver = creds.get("odbc_driver", "ODBC Driver 17 for SQL Server")
+    _validate_driver(driver)
     encrypt = ";Encrypt=yes;TrustServerCertificate=yes" if "18" in driver else ""
     cs = (
         f"DRIVER={{{driver}}};"
@@ -75,7 +91,19 @@ def _test_pyodbc(creds: dict) -> None:
         conn = pyodbc.connect(cs, timeout=5)
         conn.close()
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Connection test failed: {e}")
+        logger.warning("[connections] Connection test failed: %s", e)
+        raise HTTPException(
+            status_code=400,
+            detail="Connection test failed. Check host, port, credentials, and database name.",
+        )
+
+
+def _parse_connection_id(raw: str) -> str:
+    """Validate that a path parameter is a well-formed UUID. Returns the canonical string."""
+    try:
+        return str(uuid.UUID(raw))
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid connection ID format")
 
 
 # ---------------------------------------------------------------------------
@@ -93,7 +121,7 @@ def list_connections(user: dict = Depends(verify_token)):
         if is_admin:
             rows = conn.execute(
                 text(f"""
-                    SELECT ConnectionId, Name, IsActive, CreatedDate, ModifiedDate
+                    SELECT ConnectionId, Name, CreatedDate, ModifiedDate
                     FROM [{schema}].[Connections]
                     WHERE IsActive = 1
                     ORDER BY Name
@@ -102,7 +130,7 @@ def list_connections(user: dict = Depends(verify_token)):
         else:
             rows = conn.execute(
                 text(f"""
-                    SELECT c.ConnectionId, c.Name, c.IsActive, c.CreatedDate, c.ModifiedDate
+                    SELECT c.ConnectionId, c.Name, c.CreatedDate, c.ModifiedDate
                     FROM [{schema}].[Connections] c
                     JOIN [{schema}].[UserConnectionAccess] uca
                         ON uca.ConnectionId = c.ConnectionId
@@ -116,9 +144,8 @@ def list_connections(user: dict = Depends(verify_token)):
         {
             "id": str(r[0]),
             "name": r[1],
-            "is_active": bool(r[2]),
-            "created_date": r[3].isoformat() if r[3] else None,
-            "modified_date": r[4].isoformat() if r[4] else None,
+            "created_date": r[2].isoformat() if r[2] else None,
+            "modified_date": r[3].isoformat() if r[3] else None,
         }
         for r in rows
     ]
@@ -132,7 +159,21 @@ def list_connections(user: dict = Depends(verify_token)):
 @router.post("", status_code=201)
 def create_connection(body: ConnectionIn, user: dict = Depends(verify_token)):
     _require_admin(user)
+    _validate_driver(body.odbc_driver)
 
+    config, engine = get_config_and_engine()
+    schema = config.schema
+
+    # 1. Duplicate-name check (cheap) before live test (expensive).
+    with engine.connect() as conn:
+        existing = conn.execute(
+            text(f"SELECT 1 FROM [{schema}].[Connections] WHERE Name = :name AND IsActive = 1"),
+            {"name": body.name},
+        ).fetchone()
+    if existing:
+        raise HTTPException(status_code=409, detail="A connection with that name already exists")
+
+    # 2. Live connection test.
     creds = {
         "host": body.host,
         "port": body.port,
@@ -143,21 +184,12 @@ def create_connection(body: ConnectionIn, user: dict = Depends(verify_token)):
     }
     _test_pyodbc(creds)
 
-    config, engine = get_config_and_engine()
-    schema = config.schema
+    # 3. Encrypt and persist.
     encrypted = encrypt_credentials(engine, schema, creds)
-
     connection_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
 
     with engine.begin() as conn:
-        existing = conn.execute(
-            text(f"SELECT 1 FROM [{schema}].[Connections] WHERE Name = :name"),
-            {"name": body.name},
-        ).fetchone()
-        if existing:
-            raise HTTPException(status_code=409, detail="A connection with that name already exists")
-
         conn.execute(
             text(f"""
                 INSERT INTO [{schema}].[Connections]
@@ -191,56 +223,63 @@ def update_connection(
     user: dict = Depends(verify_token),
 ):
     _require_admin(user)
+    cid = _parse_connection_id(connection_id)
+
+    if body.odbc_driver is not None:
+        _validate_driver(body.odbc_driver)
 
     config, engine = get_config_and_engine()
     schema = config.schema
     now = datetime.now(timezone.utc)
 
-    with engine.begin() as conn:
+    # 1. Fetch current row (read-only — no transaction yet).
+    with engine.connect() as conn:
         row = conn.execute(
             text(f"""
                 SELECT ConnectionId, Name, ConnectionString
                 FROM [{schema}].[Connections]
                 WHERE ConnectionId = :cid AND IsActive = 1
             """),
-            {"cid": connection_id},
+            {"cid": cid},
         ).fetchone()
 
-        if not row:
-            raise HTTPException(status_code=404, detail="Connection not found")
+    if not row:
+        raise HTTPException(status_code=404, detail="Connection not found")
 
-        current_creds = decrypt_credentials(engine, schema, row[2])
+    current_creds = decrypt_credentials(engine, schema, row[2])
 
-        # Apply partial updates to credentials fields.
-        updated_creds = {
-            "host": body.host if body.host is not None else current_creds["host"],
-            "port": body.port if body.port is not None else current_creds["port"],
-            "db_user": body.db_user if body.db_user is not None else current_creds["db_user"],
-            "db_password": body.db_password if body.db_password is not None else current_creds["db_password"],
-            "database": body.database if body.database is not None else current_creds["database"],
-            "odbc_driver": body.odbc_driver if body.odbc_driver is not None else current_creds["odbc_driver"],
-        }
+    updated_creds = {
+        "host": body.host if body.host is not None else current_creds["host"],
+        "port": body.port if body.port is not None else current_creds["port"],
+        "db_user": body.db_user if body.db_user is not None else current_creds["db_user"],
+        "db_password": body.db_password if body.db_password is not None else current_creds["db_password"],
+        "database": body.database if body.database is not None else current_creds["database"],
+        "odbc_driver": body.odbc_driver if body.odbc_driver is not None else current_creds["odbc_driver"],
+    }
+    new_name = body.name if body.name is not None else row[1]
 
-        credential_fields = {"host", "port", "db_user", "db_password", "database", "odbc_driver"}
-        credentials_changed = any(getattr(body, f) is not None for f in credential_fields)
-        if credentials_changed:
-            _test_pyodbc(updated_creds)
-
-        new_name = body.name if body.name is not None else row[1]
-
-        if new_name != row[1]:
+    # 2. Name-collision check before live test.
+    if new_name != row[1]:
+        with engine.connect() as conn:
             conflict = conn.execute(
                 text(f"""
                     SELECT 1 FROM [{schema}].[Connections]
-                    WHERE Name = :name AND ConnectionId != :cid
+                    WHERE Name = :name AND ConnectionId != :cid AND IsActive = 1
                 """),
-                {"name": new_name, "cid": connection_id},
+                {"name": new_name, "cid": cid},
             ).fetchone()
-            if conflict:
-                raise HTTPException(status_code=409, detail="A connection with that name already exists")
+        if conflict:
+            raise HTTPException(status_code=409, detail="A connection with that name already exists")
 
-        new_encrypted = encrypt_credentials(engine, schema, updated_creds)
+    # 3. Live test only if credentials changed (outside any open transaction).
+    credential_fields = {"host", "port", "db_user", "db_password", "database", "odbc_driver"}
+    if any(getattr(body, f) is not None for f in credential_fields):
+        _test_pyodbc(updated_creds)
 
+    # 4. Encrypt and write.
+    new_encrypted = encrypt_credentials(engine, schema, updated_creds)
+
+    with engine.begin() as conn:
         conn.execute(
             text(f"""
                 UPDATE [{schema}].[Connections]
@@ -255,11 +294,11 @@ def update_connection(
                 "cs": new_encrypted,
                 "uid": user["user_id"],
                 "now": now,
-                "cid": connection_id,
+                "cid": cid,
             },
         )
 
-    return {"id": connection_id, "name": new_name}
+    return {"id": cid, "name": new_name}
 
 
 # ---------------------------------------------------------------------------
@@ -270,6 +309,7 @@ def update_connection(
 @router.delete("/{connection_id}", status_code=204)
 def delete_connection(connection_id: str, user: dict = Depends(verify_token)):
     _require_system_admin(user)
+    cid = _parse_connection_id(connection_id)
 
     config, engine = get_config_and_engine()
     schema = config.schema
@@ -278,7 +318,7 @@ def delete_connection(connection_id: str, user: dict = Depends(verify_token)):
     with engine.begin() as conn:
         row = conn.execute(
             text(f"SELECT 1 FROM [{schema}].[Connections] WHERE ConnectionId = :cid AND IsActive = 1"),
-            {"cid": connection_id},
+            {"cid": cid},
         ).fetchone()
 
         if not row:
@@ -292,5 +332,5 @@ def delete_connection(connection_id: str, user: dict = Depends(verify_token)):
                     ModifiedDate = :now
                 WHERE ConnectionId = :cid
             """),
-            {"uid": user["user_id"], "now": now, "cid": connection_id},
+            {"uid": user["user_id"], "now": now, "cid": cid},
         )

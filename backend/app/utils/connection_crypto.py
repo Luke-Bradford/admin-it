@@ -8,16 +8,24 @@
 # only requires updating the DB row, not restarting the process.
 
 import json
+import logging
 
 from cryptography.fernet import Fernet
+from fastapi import HTTPException
 from sqlalchemy.engine import Engine
 
 from app.db import fetch_secret
 
+logger = logging.getLogger(__name__)
+
 
 def _get_fernet(engine: Engine, schema: str) -> Fernet:
     key = fetch_secret(engine, schema, "CONNECTION_KEY")
-    return Fernet(key.encode())
+    try:
+        return Fernet(key.strip().encode())
+    except Exception:
+        logger.error("[connection_crypto] CONNECTION_KEY in [adm].[Secrets] is not a valid Fernet key")
+        raise HTTPException(status_code=500, detail="Server configuration error: invalid encryption key")
 
 
 def encrypt_credentials(engine: Engine, schema: str, credentials: dict) -> str:
