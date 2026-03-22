@@ -11,8 +11,15 @@ services:
     environment:
       - ACCEPT_EULA=Y
       - PYTHONUNBUFFERED=1
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000}
     env_file:
       - ./backend/.env
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   frontend:
     build:
@@ -24,3 +31,14 @@ services:
       - ./frontend:/app
       - /app/node_modules
     command: npm run dev
+    environment:
+      - VITE_BACKEND_URL=${VITE_BACKEND_URL:-http://backend:8000}
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s

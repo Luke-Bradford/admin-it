@@ -12,10 +12,10 @@ export default defineConfig({
     // serve index.html on any unknown route so BrowserRouter works
     historyApiFallback: true,
 
-    // only proxy /api/* requests to your FastAPI on localhost:8000
+    // proxy /api/* to the backend — override VITE_BACKEND_URL for local dev
     proxy: {
       '/api': {
-        target: 'http://backend:8000',
+        target: process.env.VITE_BACKEND_URL || 'http://localhost:8000',
         changeOrigin: true,
         secure: false,
       },
