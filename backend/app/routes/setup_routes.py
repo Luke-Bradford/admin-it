@@ -11,6 +11,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
@@ -23,6 +24,8 @@ from app.utils.secure_config import (
     load_core_config,
     save_core_config,
 )
+
+_optional_bearer = HTTPBearer(auto_error=False)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -83,7 +86,18 @@ async def test_connection(details: ConnDetails):
 
 
 @router.post("")
-async def setup(details: ConnDetails):
+async def setup(
+    details: ConnDetails,
+    credentials: HTTPAuthorizationCredentials | None = Depends(_optional_bearer),
+):
+    if core_config_exists():
+        # System is already configured — require a SystemAdmin JWT to overwrite.
+        if credentials is None:
+            raise HTTPException(status_code=401, detail="Authorization required to reconfigure a configured system")
+        user = verify_token(credentials)
+        if "SystemAdmin" not in user.get("roles", []):
+            raise HTTPException(status_code=403, detail="SystemAdmin role required")
+
     await test_connection(details)
 
     raw = details.model_dump(by_alias=True)
