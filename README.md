@@ -1,72 +1,49 @@
-﻿# admin-it
+# admin-it
 
-![Frontend Quality Check](https://github.com/Luke-Bradford/admin-it/actions/workflows/frontend-check.yml/badge.svg)
+![CI](https://github.com/Luke-Bradford/admin-it/actions/workflows/ci.yml/badge.svg)
 
-Self-hosted database admin panel with audit logs.
+Self-hosted SQL Server admin panel for non-technical users. Engineers wire up connections once; end users browse and interact with data without writing SQL.
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 **Requirements:**
 
-- Python 3.9+
-- Node.js 20+
-- Git
-- Docker and Docker Compose (for containerized development)
+- Docker and Docker Compose
 
----
-
-## ⚙️ Quick Development Setup
-
-1. Clone the repository:
+1. Clone the repo and create your env file:
 
     ```bash
     git clone https://github.com/Luke-Bradford/admin-it.git
     cd admin-it
+    cp .env.example .env
     ```
 
-2. Choose a setup method:
-   - **[Manual Developer Setup](./docs/developer-guide.md)** (Python + Node locally)
-   - **[Docker Setup](./docs/docker-setup.md)** (Recommended: isolated, clean)
+2. Build and start:
+
+    ```bash
+    docker compose build --no-cache
+    docker compose up
+    ```
+
+3. Open [http://localhost:3000](http://localhost:3000) and follow the setup wizard.
+
+See [docs/docker-setup.md](./docs/docker-setup.md) for full Docker instructions and environment variable reference.
+
+For local development without Docker, see [docs/developer-guide.md](./docs/developer-guide.md).
 
 ---
 
-## 📂 Project Structure
+## Stack
 
-```
-/admin-it
-  /backend
-    /app
-      main.py
-    requirements.txt
-    .gitignore
-  /frontend
-    /src
-      App.jsx
-      main.jsx
-    package.json
-    .gitignore
-    .prettierrc
-    .eslintrc.json
-    .editorconfig
-  /.github
-    /workflows
-      frontend-check.yml
-  README.md
-
-```
+- **Backend:** Python 3.11, FastAPI, SQLAlchemy, pyodbc (SQL Server)
+- **Frontend:** React 19, Vite, React Router v6
+- **Auth:** JWT HS256; roles stored in DB and checked per request
+- **CI:** ESLint + Prettier (frontend), Ruff lint + format (backend), Claude PR review
 
 ---
 
-## 📋 Additional Notes
+## License
 
-- Development work is done in feature branches; `main` remains stable.
-- Pull requests will trigger automated **frontend** linting and formatting checks.
-- Backend is initially SQL Server-focused but architecture is extendable.
-
----
-
-## 📜 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT

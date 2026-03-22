@@ -12,10 +12,14 @@ export default defineConfig({
     // serve index.html on any unknown route so BrowserRouter works
     historyApiFallback: true,
 
-    // only proxy /api/* requests to your FastAPI on localhost:8000
+    // proxy /api/* to the backend.
+    // VITE_BACKEND_URL is read from process.env here (Node context at config time),
+    // not from import.meta.env (which is client-side only). In Docker Compose the
+    // variable is injected by the environment: block. For local dev without Docker
+    // the fallback 'http://localhost:8000' is used automatically — no export needed.
     proxy: {
       '/api': {
-        target: 'http://backend:8000',
+        target: process.env.VITE_BACKEND_URL || 'http://localhost:8000',
         changeOrigin: true,
         secure: false,
       },
