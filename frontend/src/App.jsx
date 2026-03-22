@@ -7,6 +7,7 @@ import LoginPage from './pages/LoginPage.jsx';
 import RequireAuth from './components/RequireAuth';
 import Dashboard from './pages/Dashboard';
 import Layout from './components/Layout';
+import AppShell from './components/AppShell';
 import ProtectedSetupRoute from './components/ProtectedSetupRoute';
 
 function HomeLoader() {
@@ -21,9 +22,17 @@ function HomeLoader() {
 
   if (status.loading) return <div>Loading…</div>;
   return status.configured ? (
-    <Navigate to="/dashboard" replace /> // or "/" or whatever your main UI is
+    <Navigate to="/dashboard" replace />
   ) : (
     <Navigate to="/setup" replace />
+  );
+}
+
+function ComingSoon({ title }) {
+  return (
+    <div className="flex items-center justify-center h-full">
+      <p className="text-gray-400 text-sm">{title} — coming soon</p>
+    </div>
   );
 }
 
@@ -47,6 +56,7 @@ export default function App() {
         setUser(null);
       });
   }, []);
+
   return (
     <UserContext.Provider value={user}>
       <Routes>
@@ -62,16 +72,49 @@ export default function App() {
           }
         />
         <Route path="/login" element={<LoginPage />} />
+
+        {/* Authenticated shell — all routes inside share the sidebar + top bar */}
         <Route
           path="/dashboard"
           element={
             <RequireAuth>
-              <Layout>
+              <AppShell>
                 <Dashboard />
-              </Layout>
+              </AppShell>
             </RequireAuth>
           }
         />
+        <Route
+          path="/connections/*"
+          element={
+            <RequireAuth>
+              <AppShell>
+                <ComingSoon title="Connections" />
+              </AppShell>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/users/*"
+          element={
+            <RequireAuth>
+              <AppShell>
+                <ComingSoon title="Users" />
+              </AppShell>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/audit/*"
+          element={
+            <RequireAuth>
+              <AppShell>
+                <ComingSoon title="Audit Log" />
+              </AppShell>
+            </RequireAuth>
+          }
+        />
+
         <Route path="*" element={<HomeLoader />} />
       </Routes>
     </UserContext.Provider>
