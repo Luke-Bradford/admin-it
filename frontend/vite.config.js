@@ -12,7 +12,11 @@ export default defineConfig({
     // serve index.html on any unknown route so BrowserRouter works
     historyApiFallback: true,
 
-    // proxy /api/* to the backend — override VITE_BACKEND_URL for local dev
+    // proxy /api/* to the backend.
+    // VITE_BACKEND_URL is read from process.env here (Node context at config time),
+    // not from import.meta.env (which is client-side only). In Docker Compose the
+    // variable is injected by the environment: block. For local dev without Docker
+    // the fallback 'http://localhost:8000' is used automatically — no export needed.
     proxy: {
       '/api': {
         target: process.env.VITE_BACKEND_URL || 'http://localhost:8000',
