@@ -1,24 +1,33 @@
 // src/components/AppShell.jsx
 // Layout for all authenticated pages: sidebar + top bar + scrollable main area.
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Breadcrumb from './Breadcrumb';
 
 function TopBar() {
   const navigate = useNavigate();
-  const token = localStorage.getItem('token');
-  let username = null;
+  const [username, setUsername] = useState(null);
 
-  try {
-    if (token) {
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    try {
       const payload = JSON.parse(atob(token.split('.')[1]));
-      username = payload.username;
+      if (payload.username) {
+        setUsername(payload.username);
+      } else {
+        // Token valid but no username — clear and send to login.
+        localStorage.removeItem('token');
+        navigate('/login');
+      }
+    } catch {
+      // Malformed token — clear and redirect.
+      localStorage.removeItem('token');
+      navigate('/login');
     }
-  } catch {
-    localStorage.removeItem('token');
-    navigate('/login');
-  }
+  }, [navigate]);
 
   const handleLogout = () => {
     localStorage.removeItem('token');

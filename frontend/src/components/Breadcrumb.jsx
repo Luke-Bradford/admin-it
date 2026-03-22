@@ -20,7 +20,11 @@ export default function Breadcrumb() {
 
   const crumbs = segments.map((seg, i) => {
     const path = '/' + segments.slice(0, i + 1).join('/');
-    const label = SEGMENT_LABELS[seg] ?? seg;
+    // Known segments map to human-readable labels. Dynamic segments (e.g. a
+    // connection slug at /connections/<name>) fall back to the raw URL segment.
+    // Phase 2 route components should populate SEGMENT_LABELS or pass a
+    // display name via router state if the slug is not user-friendly.
+    const label = SEGMENT_LABELS[seg] ?? decodeURIComponent(seg);
     const isLast = i === segments.length - 1;
 
     return { path, label, isLast };

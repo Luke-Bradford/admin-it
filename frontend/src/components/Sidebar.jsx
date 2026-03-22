@@ -122,9 +122,7 @@ export default function Sidebar() {
       {/* Nav items */}
       <nav className="flex-1 py-3 space-y-0.5 overflow-y-auto">
         {NAV_ITEMS.map((item) => {
-          const isActive =
-            location.pathname === item.path || location.pathname.startsWith(item.path + '/');
-
+          // Unimplemented items are always greyed out — no active highlight.
           if (!item.implemented) {
             return (
               <div
@@ -139,6 +137,9 @@ export default function Sidebar() {
               </div>
             );
           }
+
+          const isActive =
+            location.pathname === item.path || location.pathname.startsWith(item.path + '/');
 
           return (
             <NavLink
