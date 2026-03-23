@@ -15,6 +15,9 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # 2) Microsoft ODBC drivers (Debian 12 / bookworm repo)
+# Note: packages.microsoft.com/config/debian/12/prod.list already includes
+# [arch=... signed-by=/usr/share/keyrings/microsoft-prod.gpg] — the sed
+# substitution is not needed and would break the entry if applied.
 RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
       | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg \
  && curl -fsSL https://packages.microsoft.com/config/debian/12/prod.list \
@@ -38,6 +41,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 WORKDIR /app
 
 # 4) Runtime deps: ODBC runtime + MS drivers
+# Note: packages.microsoft.com/config/debian/12/prod.list already includes
+# [arch=... signed-by=/usr/share/keyrings/microsoft-prod.gpg] — no sed needed.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       unixodbc libssl3 \
