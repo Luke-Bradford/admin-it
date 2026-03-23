@@ -2,9 +2,9 @@
 
 ## Vision
 
-admin-it is a self-hosted database administration panel for Microsoft SQL Server. The target user is **not a DBA** — it's the operations manager, finance analyst, or support agent who needs to interact with structured data without writing SQL. An engineer wires the connections and sets permissions once; after that, non-technical users can query, filter, export, and understand their data through a guided UI.
+admin-it is a self-hosted database administration panel for SQL Server and PostgreSQL. The target user is **not a DBA** — it's the operations manager, finance analyst, or support agent who needs to interact with structured data without writing SQL. An engineer wires the connections and sets permissions once; after that, non-technical users can query, filter, export, and understand their data through a guided UI.
 
-The commercial angle: most SMBs and mid-market companies have SQL Server databases (often from legacy ERP, CRM, or accounting systems) with no safe way to let non-engineers touch them. admin-it fills the gap between "ask a developer every time" and "give everyone SSMS access".
+The commercial angle: most SMBs and mid-market companies have SQL Server or PostgreSQL databases (often from legacy ERP, CRM, or accounting systems) with no safe way to let non-engineers touch them. admin-it fills the gap between "ask a developer every time" and "give everyone SSMS/psql access".
 
 ---
 
@@ -27,8 +27,14 @@ First-run wizard, auth, JWT middleware, schema deployment into SQL Server. Mostl
 ### Phase 1 — Core hardening (make what exists production-safe)
 Fix the critical security and reliability issues before building on top.
 
+### Phase 1.5 — Frontend overhaul
+Replace the hand-rolled setup page CSS and inconsistent Tailwind usage with a cohesive, professional design system applied across every page. No new features — purely visual quality.
+
 ### Phase 2 — Connection & user management (Admin persona)
 The engineer can manage connections and users from the UI, not by touching the DB directly.
+
+### Phase 2.5 — Multi-database core
+Extend admin-it's own schema to run on either SQL Server or PostgreSQL. The setup wizard gains a database type picker, a "create new database" option for PostgreSQL, and the ability to detect and connect to an existing install rather than always deploying fresh.
 
 ### Phase 3 — Data browser (End user + Power user persona)
 Non-technical users can browse, filter, and export data from connected databases.
@@ -197,6 +203,154 @@ Each ticket is sized S / M / L / XL (engineer-days of effort, roughly).
 
 ---
 
+### Phase 1.5 — Frontend overhaul
+
+---
+
+#### #71 — Design system foundation
+**Size:** S
+**Persona:** All (UX/DX)
+**Problem:** The UI is inconsistent — the setup page uses a hand-rolled dark CSS file from early development, the login page and authenticated shell use Tailwind inconsistently, and the overall product looks like a learning project rather than a professional tool. Before building more features on top, the visual foundation needs to be solid.
+**Background:** The stack stays as React + Tailwind. This ticket establishes a small set of reusable primitives (typography scale, colour tokens, button variants, input, card, modal, badge) that all subsequent UI work builds on. No new features — purely design infrastructure.
+**Acceptance criteria:**
+- Defined colour palette: neutral greys, a single brand-blue accent, semantic colours for success/warning/error
+- Typography: consistent type scale using Inter or similar system-friendly font; heading, body, label, caption sizes defined
+- Shared components created: `Button` (primary/secondary/danger/ghost), `Input`, `Card`, `Modal`, `Badge`, `EmptyState`, `Spinner`
+- All components use Tailwind utility classes only — no new CSS files introduced
+- Storybook or a simple component gallery page is not required; components are used directly in subsequent tickets
+- `npm run lint` and `npm run format:check` pass
+
+---
+
+#### #72 — Redesign login page
+**Size:** S
+**Persona:** End user (first impression)
+**Problem:** The login page is the first thing every user sees. It currently renders as a basic centred form with inconsistent styling — not appropriate for a product used in a business context.
+**Acceptance criteria:**
+- Clean, centred card layout on a neutral background
+- AdminIT logo/wordmark in the header
+- Username and password fields using the shared `Input` component (#71)
+- Sign in button using shared `Button` (primary) component
+- Inline error message on failed login (wrong credentials, account locked)
+- Responsive: looks correct at 1024px and above
+- No regressions in auth flow
+
+---
+
+#### #73 — Redesign setup wizard
+**Size:** M
+**Persona:** System admin (first-run experience)
+**Problem:** The setup wizard is the first screen a System Admin sees after install. It currently uses a hand-rolled dark CSS file with a cramped three-card layout that does not reflect the quality of the product. The wizard also needs to be restructured to support the multi-database setup flow introduced in Phase 2.5 (#87, #88, #89).
+**Background:** This ticket redesigns the visual presentation of the existing wizard only — it does not add new database backend support (that is Phase 2.5). The wizard steps remain: database connection → schema deployment → create admin user. The "detect existing install" and "create new database" flows are wired in during Phase 2.5 but the visual scaffolding for them can be laid here.
+**Acceptance criteria:**
+- Full-page wizard layout with a clear step indicator (step 1 of 3, etc.)
+- Each step rendered as a clean form card using shared components (#71)
+- Database connection form: host, port, database, username, password, ODBC driver — clear labels, helper text where needed
+- "Use localhost alias" toggle styled as a proper labelled checkbox
+- Test connection button shows inline success/error feedback without a page reload
+- Schema deployment step shows a progress indicator during deploy, then a clear success/failure state
+- Create admin user step: username, password, confirm password with validation
+- Consistent light theme — no dark CSS file
+- `npm run lint` and `npm run format:check` pass
+
+---
+
+#### #74 — Redesign authenticated shell (sidebar, topbar, dashboard)
+**Size:** M
+**Persona:** All authenticated users
+**Problem:** The authenticated shell (sidebar + topbar + page content area) is functional but visually rough. The sidebar collapse behaviour, active states, and typography are inconsistent. The dashboard is a placeholder card grid with no useful content.
+**Acceptance criteria:**
+- Sidebar: consistent active/hover states, proper icon alignment, smooth collapse, correct "coming soon" treatment for unimplemented items
+- Topbar: breadcrumb, username, and sign-out button using shared components; consistent height and border
+- Dashboard: replaced with a meaningful landing page — summary cards showing connection count, user count, recent activity (static/empty states are fine where data isn't yet available)
+- Page-level layout: consistent padding, max-width, and heading hierarchy across Dashboard, Connections, and any other implemented pages
+- All pages pass `npm run lint` and `npm run format:check`
+
+---
+
+### Phase 2.5 — Multi-database core
+
+---
+
+#### #75 — Abstract the core database layer
+**Size:** M
+**Persona:** Engineer (architecture)
+**Problem:** The entire backend assumes SQL Server — pyodbc connection strings, MSSQL-specific SQL syntax, temporal table queries, and ODBC driver configuration are woven throughout. Adding PostgreSQL support requires a clean abstraction boundary first.
+**Background:** admin-it's *own* schema (users, connections, audit log, etc.) is what needs to run on either backend. The *target* databases that users browse remain SQL Server for now (Phase 3+). This ticket is purely about the admin-it core schema layer.
+**Acceptance criteria:**
+- `CoreBackend` protocol/interface defined: `get_engine()`, `deploy_schema()`, `test_connection()`, `get_audit_records()`
+- `MSSQLBackend` created wrapping the existing SQL Server logic — no behaviour change, just restructured behind the interface
+- All existing routes continue to work through the abstracted interface
+- Backend selection driven by a `CORE_DB_TYPE` config value (`mssql` | `postgres`)
+- `ruff check` and `ruff format --check` pass
+
+---
+
+#### #76 — PostgreSQL backend for the core schema
+**Size:** M
+**Persona:** System admin (install on Postgres)
+**Problem:** System admins running Linux infrastructure, cloud-hosted environments, or organisations without a SQL Server licence have no way to install admin-it.
+**Background:** PostgreSQL does not have temporal tables. Audit history is implemented using a single `audit_log` table populated by:
+- **Triggers** (for schema-managed tables): `AFTER INSERT/UPDATE/DELETE` triggers write `old_data`/`new_data` as JSONB, with the app user ID passed via `SET LOCAL app.current_user_id`.
+- **Explicit writes** (for application-level events): data exports, login events, query executions written directly from Python.
+This gives the same query interface as the SQL Server audit log — the audit UI (#18) queries `audit_log` regardless of backend.
+**Acceptance criteria:**
+- `PostgreSQLBackend` implements `CoreBackend` interface (#75)
+- Core schema deployed via a `spDeployCoreSchema_postgres.sql` equivalent (plain SQL, no temporal syntax)
+- `audit_log` table created with: `id`, `table_name`, `record_id`, `action` (INSERT/UPDATE/DELETE), `changed_by`, `changed_at`, `old_data` (JSONB), `new_data` (JSONB)
+- Triggers created on all mutable core tables (Users, Connections, ConnectionPermissions, Secrets)
+- Session variable `app.current_user_id` set at the start of each request via SQLAlchemy event hook; triggers read it to populate `changed_by`
+- `GET /api/audit` returns the same response shape regardless of backend
+- Connection uses `psycopg2` or `asyncpg` via SQLAlchemy; added to `requirements.txt`
+- All existing routes pass against a Postgres instance in CI
+
+---
+
+#### #77 — SQL Server: add explicit audit_log table
+**Size:** S
+**Persona:** Admin + System admin (audit)
+**Problem:** SQL Server temporal tables record row-level history but do not capture application-level context — which admin-it user triggered the change, or events with no schema mutation (e.g. data exports, login failures). The audit UI (#18) needs a unified `audit_log` table regardless of backend.
+**Background:** Temporal tables are kept — they provide point-in-time row reconstruction which is valuable. The `audit_log` table is additive, capturing the user-context events that temporal tables miss.
+**Acceptance criteria:**
+- `audit_log` table added to the SQL Server core schema (same columns as the Postgres version: id, table_name, record_id, action, changed_by, changed_at, old_data NVARCHAR(MAX) as JSON, new_data NVARCHAR(MAX) as JSON)
+- Application-level events (login success/failure, data exports, query runs) write to `audit_log` explicitly
+- Schema changes to core tables still tracked via temporal tables; `audit_log` is not a replacement
+- `GET /api/audit` reads from `audit_log` on both backends — same response shape
+
+---
+
+#### #78 — Setup wizard: database type picker and backend-specific config
+**Size:** M
+**Persona:** System admin
+**Problem:** The setup wizard hard-codes SQL Server. A System Admin installing on PostgreSQL has no supported path.
+**Background:** This ticket wires the new backends (#76, #77) into the setup wizard UI designed in #73. Three setup paths:
+1. **SQL Server** — host, port, database, username, password, ODBC driver (existing flow)
+2. **PostgreSQL — existing database** — host, port, database, username, password
+3. **PostgreSQL — create new database** — host, port, superuser username, superuser password → admin-it runs `CREATE DATABASE`, creates a restricted app user, then proceeds with schema deployment using those app credentials
+**Acceptance criteria:**
+- Setup step 1 presents a database type selector (SQL Server / PostgreSQL)
+- SQL Server path: existing form fields, no change in behaviour
+- PostgreSQL existing path: host/port/database/user/password; tests connection with `psycopg2` before saving
+- PostgreSQL create-new path: host/port/superuser credentials; admin-it creates the database and a restricted `adminit_app` user with least-privilege grants; superuser credentials are not stored after setup completes
+- Selected backend type stored in encrypted core config alongside connection details
+- `CORE_DB_TYPE` set accordingly at startup
+- All three paths deploy the appropriate schema on success
+
+---
+
+#### #79 — Detect existing install — connect-only mode
+**Size:** S
+**Persona:** System admin
+**Problem:** The setup wizard currently assumes a fresh install and always attempts to deploy the schema. If admin-it has already been installed on this database server — or if the admin-it schema objects already exist from a previous install — the wizard will either fail or overwrite existing data.
+**Acceptance criteria:**
+- After a successful connection test, the wizard queries the database to check whether the admin-it schema and core tables already exist
+- If detected: wizard presents two options — "Connect to existing install" (skip schema deployment, proceed to login) or "Re-deploy schema" (for disaster recovery — requires explicit confirmation and warns that existing data may be affected)
+- If not detected: existing fresh-deploy flow proceeds as normal
+- "Connect to existing" path: validates that a SystemAdmin user exists in the detected schema; if not, falls back to the create-admin step
+- Works for both SQL Server and PostgreSQL backends
+
+---
+
 ### Phase 3 — Data browser
 
 ---
@@ -343,7 +497,9 @@ Each ticket is sized S / M / L / XL (engineer-days of effort, roughly).
 ## What we are explicitly not building (scope boundaries)
 
 - **Write access to target databases** — admin-it is read-only for end users. Engineers can write via SSMS or their own tools. The risk of a non-technical user accidentally mutating production data is unacceptable.
-- **Multi-database-vendor support** — SQL Server only, initially. The schema, temporal tables, and pyodbc driver choice are all SQL Server specific. PostgreSQL / MySQL support is a future phase.
+- **MySQL / Oracle / other database vendors for target connections** — SQL Server only for browsing target databases, initially. The admin-it core schema runs on SQL Server or PostgreSQL (Phase 2.5), but the data browser (Phase 3+) targets SQL Server connections only.
+- **SQLite as a core backend** — SQLite has no concurrent write support, no schema namespacing, and no viable session-variable mechanism for audit triggers. It is not a suitable backend for a multi-user application. PostgreSQL covers the "free, no licence required" use case cleanly.
+- **Docker-managed PostgreSQL** — admin-it will not spin up or manage its own Postgres container. The System Admin is responsible for providing a Postgres server (self-hosted or cloud-managed). This keeps admin-it's operational surface area small.
 - **A general SQL IDE** — We are not building SSMS in the browser. Power users can use saved queries; raw SQL execution is not a first-class feature for end users.
 - **Row-level security on target databases** — Column masking (#15) is the extent of data restriction admin-it enforces. Row-level filtering based on the logged-in user's identity is not in scope.
 
@@ -351,10 +507,10 @@ Each ticket is sized S / M / L / XL (engineer-days of effort, roughly).
 
 ## Immediate next actions (in order)
 
-1. **#1 argon2id password hashing** — security, small, no dependencies
-2. **#2 startup crash fix** — blocks any reliable testing
-3. **#3 engine caching** — reliability, small
-4. **#4 protect delete endpoint** — security, trivial
-5. **#5 ESLint fix + #6 Tailwind** — unblock frontend development (CI will fail until these are fixed)
-6. **#7 reconcile ORM** — clear the dead code before building on top
-7. Then Phase 2 (connections + users) — the minimum for an engineer to hand off to a non-technical user
+Phase 1 hardening is complete. Phase 2 (connection and user management) is in progress — connection management API (#53) and UI (#54) are done. Remaining work in priority order:
+
+1. **#55 / #56 — User management API + UI** — minimum viable admin handoff
+2. **#57 — User profile & password change** — basic user self-service
+3. **#71–#74 — Frontend overhaul (Phase 1.5)** — design quality pass before the product is shown to real users
+4. **#75–#79 — Multi-database core (Phase 2.5)** — PostgreSQL support and smarter setup wizard
+5. Then Phase 3 (data browser) — the core end-user value
