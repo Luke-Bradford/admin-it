@@ -52,10 +52,17 @@ function ConnectionModal({ mode, initial, onClose, onSaved }) {
     setSaving(true);
     setError(null);
 
+    const port = parseInt(form.port, 10);
+    if (!Number.isFinite(port) || port < 1 || port > 65535) {
+      setSaving(false);
+      setError('Port must be a number between 1 and 65535.');
+      return;
+    }
+
     const payload = {
       name: form.name,
       host: form.host,
-      port: parseInt(form.port, 10),
+      port,
       database: form.database,
       db_user: form.db_user,
       odbc_driver: form.odbc_driver,
@@ -385,14 +392,9 @@ export default function ConnectionsPage() {
 
   function handleSaved(data) {
     if (modal?.type === 'add') {
-      // Re-fetch to get the full row including server-set dates.
-      fetch('/api/connections', { headers: authHeader() })
-        .then((r) => {
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          return r.json();
-        })
-        .then((list) => dispatch({ type: 'LOADED', payload: list }))
-        .catch((err) => dispatch({ type: 'ERROR', payload: err.message }));
+      // Optimistically add using the POST response. Dates are not returned by
+      // the POST endpoint so they render as '—' until a manual refresh.
+      dispatch({ type: 'ADD', payload: { created_date: null, modified_date: null, ...data } });
     } else {
       dispatch({ type: 'UPDATE', payload: data });
     }
