@@ -14,6 +14,7 @@ from app.routes.connections_routes import router as connections_router
 from app.routes.discovery_routes import router as discovery_router
 from app.routes.manage_routes import router as manage_router
 from app.routes.setup_routes import router as setup_router
+from app.routes.users_routes import router as users_router
 from app.utils.db_helpers import init_engine
 from app.utils.secure_config import core_config_exists
 
@@ -72,3 +73,4 @@ app.include_router(discovery_router, prefix="/api/discover", tags=["Discovery"])
 app.include_router(auth_router, prefix="/api/auth", tags=["Auth"])
 app.include_router(manage_router, prefix="/api/manage", tags=["Manage"])
 app.include_router(connections_router, prefix="/api/connections", tags=["Connections"])
+app.include_router(users_router, prefix="/api/users", tags=["Users"])
