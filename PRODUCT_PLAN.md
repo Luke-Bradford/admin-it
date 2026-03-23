@@ -240,7 +240,7 @@ Each ticket is sized S / M / L / XL (engineer-days of effort, roughly).
 #### #73 — Redesign setup wizard
 **Size:** M
 **Persona:** System admin (first-run experience)
-**Problem:** The setup wizard is the first screen a System Admin sees after install. It currently uses a hand-rolled dark CSS file with a cramped three-card layout that does not reflect the quality of the product. The wizard also needs to be restructured to support the multi-database setup flow introduced in Phase 2.5 (#87, #88, #89).
+**Problem:** The setup wizard is the first screen a System Admin sees after install. It currently uses a hand-rolled dark CSS file with a cramped three-card layout that does not reflect the quality of the product. The wizard also needs to be restructured to support the multi-database setup flow introduced in Phase 2.5 (#78, #79).
 **Background:** This ticket redesigns the visual presentation of the existing wizard only — it does not add new database backend support (that is Phase 2.5). The wizard steps remain: database connection → schema deployment → create admin user. The "detect existing install" and "create new database" flows are wired in during Phase 2.5 but the visual scaffolding for them can be laid here.
 **Acceptance criteria:**
 - Full-page wizard layout with a clear step indicator (step 1 of 3, etc.)
