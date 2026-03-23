@@ -37,8 +37,6 @@ function ConnectionModal({ mode, initial, onClose, onSaved }) {
   );
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState(null);
   const firstInputRef = useRef(null);
 
   useEffect(() => {
@@ -47,26 +45,6 @@ function ConnectionModal({ mode, initial, onClose, onSaved }) {
 
   function set(field, value) {
     setForm((f) => ({ ...f, [field]: value }));
-    setTestResult(null);
-  }
-
-  async function handleTestConnection() {
-    setTesting(true);
-    setTestResult(null);
-    setError(null);
-
-    // Use a temporary POST with a flag to test without saving — we reuse the
-    // POST endpoint here since the backend tests before persisting. For test-only
-    // we send to a dedicated test path if it exists, otherwise we rely on the
-    // fact that validation happens before DB write. For now we simply indicate
-    // to the user to save and the backend will validate on save.
-    // The backend doesn't have a separate test endpoint, so we inform the user
-    // that connection will be tested on save.
-    setTesting(false);
-    setTestResult({
-      ok: true,
-      message: 'Connection will be tested automatically when you save.',
-    });
   }
 
   async function handleSubmit(e) {
@@ -139,8 +117,8 @@ function ConnectionModal({ mode, initial, onClose, onSaved }) {
           </button>
         </div>
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="px-6 py-4 space-y-4">
+        {/* Form — footer is inside so Save is a proper submit control */}
+        <form id="connection-form" onSubmit={handleSubmit} className="px-6 py-4 space-y-4">
           {error && (
             <div className="rounded bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
               {error}
@@ -255,30 +233,8 @@ function ConnectionModal({ mode, initial, onClose, onSaved }) {
             </select>
           </div>
 
-          {testResult && (
-            <div
-              className={`rounded border px-3 py-2 text-sm ${
-                testResult.ok
-                  ? 'bg-green-50 border-green-200 text-green-700'
-                  : 'bg-red-50 border-red-200 text-red-700'
-              }`}
-            >
-              {testResult.message}
-            </div>
-          )}
-        </form>
-
-        {/* Footer */}
-        <div className="flex items-center justify-between px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-lg">
-          <button
-            type="button"
-            onClick={handleTestConnection}
-            disabled={testing || saving}
-            className="text-sm text-blue-600 hover:text-blue-800 disabled:opacity-50"
-          >
-            {testing ? 'Testing…' : 'Test connection info'}
-          </button>
-          <div className="flex gap-3">
+          {/* Footer — inside the form so Save is a native submit button */}
+          <div className="flex justify-end gap-3 pt-2 border-t border-gray-200 -mx-6 px-6 pb-0 mt-2">
             <button
               type="button"
               onClick={onClose}
@@ -289,18 +245,13 @@ function ConnectionModal({ mode, initial, onClose, onSaved }) {
             </button>
             <button
               type="submit"
-              form=""
               disabled={saving}
-              onClick={(e) => {
-                // Trigger the form submit
-                e.currentTarget.closest('.fixed').querySelector('form').requestSubmit();
-              }}
               className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
             >
               {saving ? 'Saving…' : mode === 'add' ? 'Add connection' : 'Save changes'}
             </button>
           </div>
-        </div>
+        </form>
       </div>
     </div>
   );
@@ -434,10 +385,14 @@ export default function ConnectionsPage() {
 
   function handleSaved(data) {
     if (modal?.type === 'add') {
-      // Reload the list to get full row data with dates
+      // Re-fetch to get the full row including server-set dates.
       fetch('/api/connections', { headers: authHeader() })
-        .then((r) => r.json())
-        .then((list) => dispatch({ type: 'LOADED', payload: list }));
+        .then((r) => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json();
+        })
+        .then((list) => dispatch({ type: 'LOADED', payload: list }))
+        .catch((err) => dispatch({ type: 'ERROR', payload: err.message }));
     } else {
       dispatch({ type: 'UPDATE', payload: data });
     }
