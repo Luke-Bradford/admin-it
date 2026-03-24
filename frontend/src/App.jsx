@@ -7,6 +7,7 @@ import LoginPage from './pages/LoginPage.jsx';
 import RequireAuth from './components/RequireAuth';
 import Dashboard from './pages/Dashboard';
 import ConnectionsPage from './pages/ConnectionsPage';
+import UsersPage from './pages/UsersPage';
 import Layout from './components/Layout';
 import AppShell from './components/AppShell';
 import ProtectedSetupRoute from './components/ProtectedSetupRoute';
@@ -100,7 +101,7 @@ export default function App() {
           element={
             <RequireAuth>
               <AppShell>
-                <ComingSoon title="Users" />
+                <UsersPage />
               </AppShell>
             </RequireAuth>
           }
