@@ -27,9 +27,18 @@ function LoginPage() {
         const { token } = await res.json();
         localStorage.setItem('token', token);
 
-        // Decode and store user info
-        const payload = JSON.parse(atob(token.split('.')[1]));
-        localStorage.setItem('user', JSON.stringify(payload));
+        // Decode and store user info. Guard against a malformed token so a
+        // bad server response doesn't produce a misleading network-error message.
+        const parts = token.split('.');
+        if (parts.length >= 3) {
+          try {
+            const payload = JSON.parse(atob(parts[1]));
+            localStorage.setItem('user', JSON.stringify(payload));
+          } catch {
+            // Ignore decode failure — token is still stored; UserContext will
+            // fetch /api/auth/me on mount and populate user state correctly.
+          }
+        }
 
         navigate('/dashboard');
       } else {
