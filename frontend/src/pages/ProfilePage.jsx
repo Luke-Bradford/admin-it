@@ -49,15 +49,14 @@ export default function ProfilePage() {
       if (res.status === 204) {
         setSuccess(true);
         setForm({ current_password: '', new_password: '', confirm_password: '' });
-        setSaving(false);
         return;
       }
 
       const data = await res.json().catch(() => ({}));
       setError(data.detail ?? 'An error occurred.');
-      setSaving(false);
     } catch {
       setError('Network error. Please try again.');
+    } finally {
       setSaving(false);
     }
   }

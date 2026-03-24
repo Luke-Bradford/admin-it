@@ -174,11 +174,16 @@ class ChangePasswordRequest(BaseModel):
 
 @router.post("/change-password", status_code=204)
 def change_password(body: ChangePasswordRequest, user: dict = Depends(verify_token)):
+    # verify_token (from app.utils.auth_dependency) re-checks the DB on every
+    # request — it fetches Username, IsActive, and roles, and raises 403 if the
+    # user is not found or is inactive. It is the shared dependency used across
+    # all protected routes (users_routes, connections_routes, etc.).
     config, engine = get_config_and_engine()
     schema = config.schema
     uid = user["user_id"]
 
-    with engine.begin() as conn:
+    # Validate before opening a write transaction.
+    with engine.connect() as conn:
         row = conn.execute(
             text(f"""
                 SELECT u.PasswordHash, us.Salt
@@ -189,16 +194,20 @@ def change_password(body: ChangePasswordRequest, user: dict = Depends(verify_tok
             {"uid": uid},
         ).fetchone()
 
-        if not row:
-            raise HTTPException(status_code=404, detail="User not found")
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found")
 
-        stored_hash, salt = row[0], row[1]
+    stored_hash, salt = row[0], row[1]
 
-        if not verify_password(body.current_password, stored_hash, salt):
-            raise HTTPException(status_code=400, detail="Current password is incorrect")
+    if not verify_password(body.current_password, stored_hash, salt):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
 
-        new_hash = hash_password(body.new_password)
+    if body.current_password == body.new_password:
+        raise HTTPException(status_code=400, detail="New password must differ from the current password")
 
+    new_hash = hash_password(body.new_password)
+
+    with engine.begin() as conn:
         conn.execute(
             text(f"""
                 UPDATE [{schema}].[Users]
