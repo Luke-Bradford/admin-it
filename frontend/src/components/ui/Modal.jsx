@@ -1,26 +1,26 @@
 // src/components/ui/Modal.jsx
 import React, { useEffect } from 'react';
 
-export default function Modal({ title, onClose, children, size = 'md' }) {
-  const SIZE = {
-    sm: 'max-w-sm',
-    md: 'max-w-md',
-    lg: 'max-w-lg',
-  };
+const SIZE = {
+  sm: 'max-w-sm',
+  md: 'max-w-md',
+  lg: 'max-w-lg',
+};
 
-  // Close on Escape
+export default function Modal({ title, onClose, children, size = 'md', disableClose = false }) {
+  // Close on Escape unless disableClose (e.g. mid-submit)
   useEffect(() => {
     function handleKey(e) {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape' && !disableClose) onClose();
     }
     document.addEventListener('keydown', handleKey);
     return () => document.removeEventListener('keydown', handleKey);
-  }, [onClose]);
+  }, [onClose, disableClose]);
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
+      onClick={(e) => e.target === e.currentTarget && !disableClose && onClose()}
     >
       <div className={`bg-white rounded-lg shadow-xl w-full ${SIZE[size]} mx-4`}>
         {/* Header */}
@@ -28,7 +28,8 @@ export default function Modal({ title, onClose, children, size = 'md' }) {
           <h2 className="text-base font-semibold text-gray-900">{title}</h2>
           <button
             onClick={onClose}
-            className="p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+            disabled={disableClose}
+            className="p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             aria-label="Close"
           >
             <svg

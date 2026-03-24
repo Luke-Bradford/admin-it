@@ -89,7 +89,7 @@ export default function ProfilePage() {
             </div>
           )}
           {success && (
-            <div className="rounded bg-success-50 border border-success-100 px-3 py-2 text-sm text-success-700">
+            <div className="rounded bg-success-50 border border-success-200 px-3 py-2 text-sm text-success-700">
               Password changed successfully.
             </div>
           )}

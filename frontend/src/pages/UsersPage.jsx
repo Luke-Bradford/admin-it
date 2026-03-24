@@ -84,7 +84,7 @@ function AddUserModal({ user: callerUser, onClose, onAdded }) {
   const roles = assignableRoles(callerUser);
 
   return (
-    <Modal title="Add user" onClose={onClose}>
+    <Modal title="Add user" onClose={onClose} disableClose={saving}>
       <form onSubmit={handleSubmit}>
         <ModalBody className="space-y-4">
           {error && (
@@ -193,7 +193,7 @@ function EditRoleModal({ target, callerUser, onClose, onSaved }) {
   }
 
   return (
-    <Modal title="Edit role" onClose={onClose} size="sm">
+    <Modal title="Edit role" onClose={onClose} size="sm" disableClose={saving}>
       <form onSubmit={handleSubmit}>
         <ModalBody className="space-y-4">
           {error && (
@@ -258,7 +258,7 @@ function DeactivateModal({ target, onClose, onDeactivated }) {
   }
 
   return (
-    <Modal title="Deactivate user" onClose={onClose}>
+    <Modal title="Deactivate user" onClose={onClose} disableClose={deactivating}>
       <ModalBody>
         {error && (
           <div className="mb-3 rounded bg-danger-50 border border-danger-200 px-3 py-2 text-sm text-danger-700">

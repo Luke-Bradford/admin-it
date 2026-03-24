@@ -102,7 +102,7 @@ function ConnectionModal({ mode, initial, onClose, onSaved }) {
   const title = mode === 'add' ? 'Add connection' : 'Edit connection';
 
   return (
-    <Modal title={title} onClose={onClose} size="lg">
+    <Modal title={title} onClose={onClose} size="lg" disableClose={saving}>
       <form id="connection-form" onSubmit={handleSubmit}>
         <ModalBody className="space-y-4">
           {error && (
@@ -253,7 +253,7 @@ function DeleteModal({ connection, onClose, onDeleted }) {
   }
 
   return (
-    <Modal title="Delete connection" onClose={onClose}>
+    <Modal title="Delete connection" onClose={onClose} disableClose={deleting}>
       <ModalBody>
         {error && (
           <div className="mb-3 rounded bg-danger-50 border border-danger-200 px-3 py-2 text-sm text-danger-700">
