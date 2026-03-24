@@ -1,6 +1,6 @@
 // src/components/Sidebar.jsx
 import React, { useState } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink } from 'react-router-dom';
 
 const NAV_ITEMS = [
   {
@@ -8,7 +8,7 @@ const NAV_ITEMS = [
     path: '/dashboard',
     icon: (
       <svg
-        className="w-5 h-5"
+        className="w-5 h-5 shrink-0"
         fill="none"
         stroke="currentColor"
         strokeWidth={1.75}
@@ -28,7 +28,7 @@ const NAV_ITEMS = [
     path: '/connections',
     icon: (
       <svg
-        className="w-5 h-5"
+        className="w-5 h-5 shrink-0"
         fill="none"
         stroke="currentColor"
         strokeWidth={1.75}
@@ -44,7 +44,7 @@ const NAV_ITEMS = [
     path: '/users',
     icon: (
       <svg
-        className="w-5 h-5"
+        className="w-5 h-5 shrink-0"
         fill="none"
         stroke="currentColor"
         strokeWidth={1.75}
@@ -64,7 +64,7 @@ const NAV_ITEMS = [
     path: '/audit',
     icon: (
       <svg
-        className="w-5 h-5"
+        className="w-5 h-5 shrink-0"
         fill="none"
         stroke="currentColor"
         strokeWidth={1.75}
@@ -81,9 +81,13 @@ const NAV_ITEMS = [
   },
 ];
 
+const BASE_ITEM = 'flex items-center gap-3 px-3 py-2 mx-2 rounded transition-colors text-sm';
+const ACTIVE_ITEM = 'bg-gray-700 text-white';
+const INACTIVE_ITEM = 'text-gray-400 hover:bg-gray-800 hover:text-white';
+const DISABLED_ITEM = 'text-gray-600 cursor-not-allowed select-none';
+
 export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
-  const location = useLocation();
 
   return (
     <aside
@@ -100,7 +104,9 @@ export default function Sidebar() {
         )}
         <button
           onClick={() => setCollapsed((c) => !c)}
-          className={`ml-auto p-1 rounded hover:bg-gray-700 text-gray-400 hover:text-white transition-colors ${collapsed ? 'mx-auto' : ''}`}
+          className={`p-1 rounded hover:bg-gray-700 text-gray-400 hover:text-white transition-colors ${
+            collapsed ? 'mx-auto' : 'ml-auto'
+          }`}
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
           <svg
@@ -122,40 +128,31 @@ export default function Sidebar() {
       {/* Nav items */}
       <nav className="flex-1 py-3 space-y-0.5 overflow-y-auto">
         {NAV_ITEMS.map((item) => {
-          // Unimplemented items are always greyed out — no active highlight.
           if (!item.implemented) {
             return (
               <div
                 key={item.path}
                 title={collapsed ? item.label : undefined}
-                className={`flex items-center gap-3 px-3 py-2 mx-2 rounded text-gray-500 cursor-not-allowed select-none ${
-                  collapsed ? 'justify-center' : ''
-                }`}
+                className={`${BASE_ITEM} ${DISABLED_ITEM} ${collapsed ? 'justify-center' : ''}`}
               >
                 {item.icon}
-                {!collapsed && <span className="text-sm">{item.label}</span>}
+                {!collapsed && <span>{item.label}</span>}
               </div>
             );
           }
-
-          const isActive =
-            location.pathname === item.path || location.pathname.startsWith(item.path + '/');
 
           return (
             <NavLink
               key={item.path}
               to={item.path}
+              end={item.path === '/dashboard'}
               title={collapsed ? item.label : undefined}
-              className={`flex items-center gap-3 px-3 py-2 mx-2 rounded transition-colors ${
-                collapsed ? 'justify-center' : ''
-              } ${
-                isActive
-                  ? 'bg-gray-700 text-white'
-                  : 'text-gray-400 hover:bg-gray-800 hover:text-white'
-              }`}
+              className={({ isActive }) =>
+                `${BASE_ITEM} ${isActive ? ACTIVE_ITEM : INACTIVE_ITEM} ${collapsed ? 'justify-center' : ''}`
+              }
             >
               {item.icon}
-              {!collapsed && <span className="text-sm">{item.label}</span>}
+              {!collapsed && <span>{item.label}</span>}
             </NavLink>
           );
         })}
