@@ -2,33 +2,39 @@
 import React, { useContext, useEffect, useReducer, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { UserContext } from '../context/UserContext';
+import { authHeader } from '../utils/auth';
+import Button from '../components/ui/Button';
+import Input, { Select } from '../components/ui/Input';
+import Modal, { ModalBody, ModalFooter } from '../components/ui/Modal';
+import Badge from '../components/ui/Badge';
+import EmptyState from '../components/ui/EmptyState';
 
 const ADMIN_ROLES = new Set(['Admin', 'SystemAdmin']);
 const SYSTEM_ADMIN_ROLES = new Set(['SystemAdmin']);
 
 const ALL_ROLES = ['EndUser', 'Admin', 'SystemAdmin'];
 
+const ROLE_PRECEDENCE = { EndUser: 1, Admin: 2, SystemAdmin: 3 };
+
+const ROLE_BADGE_VARIANT = {
+  SystemAdmin: 'purple',
+  Admin: 'blue',
+  EndUser: 'default',
+};
+
 function hasRole(user, roleSet) {
   if (!user?.roles) return false;
   return user.roles.some((r) => roleSet.has(r));
 }
 
-function authHeader() {
-  const token = localStorage.getItem('token');
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
 function callerMaxPrecedence(user) {
-  const prec = { EndUser: 1, Admin: 2, SystemAdmin: 3 };
   if (!user?.roles) return 0;
-  return Math.max(...user.roles.map((r) => prec[r] ?? 0), 0);
+  return Math.max(...user.roles.map((r) => ROLE_PRECEDENCE[r] ?? 0), 0);
 }
 
-// Roles the calling user is allowed to assign (cannot escalate above own level).
 function assignableRoles(user) {
   const maxPrec = callerMaxPrecedence(user);
-  const prec = { EndUser: 1, Admin: 2, SystemAdmin: 3 };
-  return ALL_ROLES.filter((r) => (prec[r] ?? 0) <= maxPrec);
+  return ALL_ROLES.filter((r) => (ROLE_PRECEDENCE[r] ?? 0) <= maxPrec);
 }
 
 // ---------------------------------------------------------------------------
@@ -55,7 +61,6 @@ function AddUserModal({ user: callerUser, onClose, onAdded }) {
     e.preventDefault();
     setSaving(true);
     setError(null);
-
     try {
       const res = await fetch('/api/users', {
         method: 'POST',
@@ -79,116 +84,76 @@ function AddUserModal({ user: callerUser, onClose, onAdded }) {
   const roles = assignableRoles(callerUser);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-          <h2 className="text-base font-semibold text-gray-900">Add user</h2>
-          <button
-            onClick={onClose}
-            className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
-            aria-label="Close"
-          >
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-              viewBox="0 0 24 24"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="px-6 py-4 space-y-4">
+    <Modal title="Add user" onClose={onClose} disableClose={saving}>
+      <form onSubmit={handleSubmit}>
+        <ModalBody className="space-y-4">
           {error && (
-            <div className="rounded bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
+            <div className="rounded bg-danger-50 border border-danger-200 px-3 py-2 text-sm text-danger-700">
               {error}
             </div>
           )}
-
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Username <span className="text-red-500">*</span>
+              Username <span className="text-danger-600">*</span>
             </label>
-            <input
+            <Input
               ref={firstInputRef}
               type="text"
               required
               maxLength={100}
               value={form.username}
               onChange={(e) => set('username', e.target.value)}
-              className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               autoComplete="username"
             />
           </div>
-
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Email <span className="text-red-500">*</span>
+              Email <span className="text-danger-600">*</span>
             </label>
-            <input
+            <Input
               type="email"
               required
               maxLength={255}
               value={form.email}
               onChange={(e) => set('email', e.target.value)}
-              className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               autoComplete="email"
             />
           </div>
-
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Password <span className="text-red-500">*</span>
+              Password <span className="text-danger-600">*</span>
             </label>
-            <input
+            <Input
               type="password"
               required
               minLength={12}
               value={form.password}
               onChange={(e) => set('password', e.target.value)}
-              className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               autoComplete="new-password"
             />
             <p className="mt-1 text-xs text-gray-400">Minimum 12 characters</p>
           </div>
-
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
-            <select
-              value={form.role}
-              onChange={(e) => set('role', e.target.value)}
-              className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
+            <Select value={form.role} onChange={(e) => set('role', e.target.value)}>
               {roles.map((r) => (
                 <option key={r} value={r}>
                   {r}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
-
-          <div className="flex justify-end gap-3 pt-2 border-t border-gray-200 -mx-6 px-6 pb-0 mt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={saving}
-              className="px-4 py-2 text-sm border border-gray-300 rounded text-gray-700 hover:bg-gray-100 disabled:opacity-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
-            >
-              {saving ? 'Adding…' : 'Add user'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="secondary" type="button" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={saving}>
+            {saving ? 'Adding…' : 'Add user'}
+          </Button>
+        </ModalFooter>
+      </form>
+    </Modal>
   );
 }
 
@@ -207,7 +172,6 @@ function EditRoleModal({ target, callerUser, onClose, onSaved }) {
     e.preventDefault();
     setSaving(true);
     setError(null);
-
     try {
       const res = await fetch(`/api/users/${target.id}`, {
         method: 'PATCH',
@@ -229,73 +193,38 @@ function EditRoleModal({ target, callerUser, onClose, onSaved }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-sm mx-4">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-          <h2 className="text-base font-semibold text-gray-900">Edit role</h2>
-          <button
-            onClick={onClose}
-            className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
-            aria-label="Close"
-          >
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-              viewBox="0 0 24 24"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="px-6 py-4 space-y-4">
+    <Modal title="Edit role" onClose={onClose} size="sm" disableClose={saving}>
+      <form onSubmit={handleSubmit}>
+        <ModalBody className="space-y-4">
           {error && (
-            <div className="rounded bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
+            <div className="rounded bg-danger-50 border border-danger-200 px-3 py-2 text-sm text-danger-700">
               {error}
             </div>
           )}
-
           <p className="text-sm text-gray-700">
             Changing role for <span className="font-semibold">{target.username}</span>
           </p>
-
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
-            <select
-              value={role}
-              onChange={(e) => setRole(e.target.value)}
-              className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
+            <Select value={role} onChange={(e) => setRole(e.target.value)}>
               {roles.map((r) => (
                 <option key={r} value={r}>
                   {r}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
-
-          <div className="flex justify-end gap-3 pt-2 border-t border-gray-200 -mx-6 px-6 pb-0 mt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={saving}
-              className="px-4 py-2 text-sm border border-gray-300 rounded text-gray-700 hover:bg-gray-100 disabled:opacity-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
-            >
-              {saving ? 'Saving…' : 'Save'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="secondary" type="button" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={saving}>
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
+        </ModalFooter>
+      </form>
+    </Modal>
   );
 }
 
@@ -329,46 +258,33 @@ function DeactivateModal({ target, onClose, onDeactivated }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
-        <div className="px-6 py-4 border-b border-gray-200">
-          <h2 className="text-base font-semibold text-gray-900">Deactivate user</h2>
-        </div>
-        <div className="px-6 py-4">
-          {error && (
-            <div className="mb-3 rounded bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
-              {error}
-            </div>
-          )}
-          <p className="text-sm text-gray-700">
-            Are you sure you want to deactivate{' '}
-            <span className="font-semibold">{target.username}</span>? They will no longer be able to
-            sign in.
-          </p>
-        </div>
-        <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-lg">
-          <button
-            onClick={onClose}
-            disabled={deactivating}
-            className="px-4 py-2 text-sm border border-gray-300 rounded text-gray-700 hover:bg-gray-100 disabled:opacity-50"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleDeactivate}
-            disabled={deactivating}
-            className="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
-          >
-            {deactivating ? 'Deactivating…' : 'Deactivate'}
-          </button>
-        </div>
-      </div>
-    </div>
+    <Modal title="Deactivate user" onClose={onClose} disableClose={deactivating}>
+      <ModalBody>
+        {error && (
+          <div className="mb-3 rounded bg-danger-50 border border-danger-200 px-3 py-2 text-sm text-danger-700">
+            {error}
+          </div>
+        )}
+        <p className="text-sm text-gray-700">
+          Are you sure you want to deactivate{' '}
+          <span className="font-semibold">{target.username}</span>? They will no longer be able to
+          sign in.
+        </p>
+      </ModalBody>
+      <ModalFooter>
+        <Button variant="secondary" onClick={onClose} disabled={deactivating}>
+          Cancel
+        </Button>
+        <Button variant="danger" onClick={handleDeactivate} disabled={deactivating}>
+          {deactivating ? 'Deactivating…' : 'Deactivate'}
+        </Button>
+      </ModalFooter>
+    </Modal>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Users state reducer
+// Reducer
 // ---------------------------------------------------------------------------
 
 function usersReducer(state, action) {
@@ -396,25 +312,6 @@ function usersReducer(state, action) {
     default:
       return state;
   }
-}
-
-// ---------------------------------------------------------------------------
-// Role badge
-// ---------------------------------------------------------------------------
-
-const ROLE_BADGE_CLASSES = {
-  SystemAdmin: 'bg-purple-100 text-purple-700',
-  Admin: 'bg-blue-100 text-blue-700',
-  EndUser: 'bg-gray-100 text-gray-600',
-};
-
-function RoleBadge({ role }) {
-  const cls = ROLE_BADGE_CLASSES[role] ?? 'bg-gray-100 text-gray-600';
-  return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${cls}`}>
-      {role}
-    </span>
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -452,7 +349,6 @@ export default function UsersPage() {
   }, [navigate]);
 
   function handleAdded(data) {
-    // POST returns { id, username, email, role } — normalise to list shape
     dispatch({
       type: 'ADD',
       payload: {
@@ -492,14 +388,10 @@ export default function UsersPage() {
   return (
     <>
       <div className="space-y-6">
-        {/* Page header */}
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-gray-900">Users</h1>
           {isAdmin && (
-            <button
-              onClick={() => setModal({ type: 'add' })}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 transition-colors"
-            >
+            <Button onClick={() => setModal({ type: 'add' })}>
               <svg
                 className="w-4 h-4"
                 fill="none"
@@ -510,28 +402,22 @@ export default function UsersPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
               </svg>
               Add user
-            </button>
+            </Button>
           )}
         </div>
 
-        {/* Table card */}
-        <div className="bg-white shadow rounded-lg overflow-hidden">
+        <div className="bg-white shadow-sm rounded-lg border border-gray-200 overflow-hidden">
           {state.loading && (
             <div className="py-16 text-center text-sm text-gray-400">Loading users…</div>
           )}
-
           {state.error && (
-            <div className="py-16 text-center text-sm text-red-500">
+            <div className="py-16 text-center text-sm text-danger-600">
               Failed to load users: {state.error}
             </div>
           )}
-
           {!state.loading && !state.error && state.users.length === 0 && (
-            <div className="py-16 text-center">
-              <p className="text-sm text-gray-400">No users found.</p>
-            </div>
+            <EmptyState message="No users found." />
           )}
-
           {!state.loading && !state.error && state.users.length > 0 && (
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
@@ -575,7 +461,9 @@ export default function UsersPage() {
                       {u.roles.length > 0 ? (
                         <div className="flex flex-wrap gap-1">
                           {u.roles.map((r) => (
-                            <RoleBadge key={r} role={r} />
+                            <Badge key={r} variant={ROLE_BADGE_VARIANT[r] ?? 'default'}>
+                              {r}
+                            </Badge>
                           ))}
                         </div>
                       ) : (
@@ -584,13 +472,9 @@ export default function UsersPage() {
                     </td>
                     <td className="px-6 py-4 text-sm">
                       {u.is_active ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">
-                          Active
-                        </span>
+                        <Badge variant="green">Active</Badge>
                       ) : (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500">
-                          Inactive
-                        </span>
+                        <Badge variant="default">Inactive</Badge>
                       )}
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-500">
@@ -602,7 +486,7 @@ export default function UsersPage() {
                           {u.is_active && (
                             <button
                               onClick={() => setModal({ type: 'edit-role', target: u })}
-                              className="text-sm text-blue-600 hover:text-blue-800 transition-colors"
+                              className="text-sm text-brand-600 hover:text-brand-800 transition-colors"
                             >
                               Edit role
                             </button>
@@ -610,7 +494,7 @@ export default function UsersPage() {
                           {isSystemAdmin && u.is_active && !isSelf(u) && (
                             <button
                               onClick={() => setModal({ type: 'deactivate', target: u })}
-                              className="text-sm text-red-500 hover:text-red-700 transition-colors"
+                              className="text-sm text-danger-600 hover:text-danger-800 transition-colors"
                             >
                               Deactivate
                             </button>
@@ -626,7 +510,6 @@ export default function UsersPage() {
         </div>
       </div>
 
-      {/* Modals */}
       {modal?.type === 'add' && (
         <AddUserModal user={callerUser} onClose={() => setModal(null)} onAdded={handleAdded} />
       )}

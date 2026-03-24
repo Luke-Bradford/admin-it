@@ -1,11 +1,9 @@
 // src/pages/ProfilePage.jsx
 import React, { useContext, useState } from 'react';
 import { UserContext } from '../context/UserContext';
-
-function authHeader() {
-  const token = localStorage.getItem('token');
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
+import { authHeader } from '../utils/auth';
+import Button from '../components/ui/Button';
+import Input from '../components/ui/Input';
 
 export default function ProfilePage() {
   const user = useContext(UserContext);
@@ -66,7 +64,7 @@ export default function ProfilePage() {
       <h1 className="text-2xl font-bold text-gray-900">Profile</h1>
 
       {/* User info card */}
-      <div className="bg-white shadow rounded-lg divide-y divide-gray-100">
+      <div className="bg-white shadow-sm rounded-lg border border-gray-200 divide-y divide-gray-100">
         <div className="px-6 py-4 flex justify-between items-center">
           <span className="text-sm font-medium text-gray-500">Username</span>
           <span className="text-sm text-gray-900">{user?.username ?? '—'}</span>
@@ -80,47 +78,45 @@ export default function ProfilePage() {
       </div>
 
       {/* Change password card */}
-      <div className="bg-white shadow rounded-lg">
+      <div className="bg-white shadow-sm rounded-lg border border-gray-200">
         <div className="px-6 py-4 border-b border-gray-200">
           <h2 className="text-base font-semibold text-gray-900">Change password</h2>
         </div>
         <form onSubmit={handleSubmit} className="px-6 py-4 space-y-4">
           {error && (
-            <div className="rounded bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
+            <div className="rounded bg-danger-50 border border-danger-200 px-3 py-2 text-sm text-danger-700">
               {error}
             </div>
           )}
           {success && (
-            <div className="rounded bg-green-50 border border-green-200 px-3 py-2 text-sm text-green-700">
+            <div className="rounded bg-success-50 border border-success-200 px-3 py-2 text-sm text-success-700">
               Password changed successfully.
             </div>
           )}
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Current password <span className="text-red-500">*</span>
+              Current password <span className="text-danger-600">*</span>
             </label>
-            <input
+            <Input
               type="password"
               required
               value={form.current_password}
               onChange={(e) => set('current_password', e.target.value)}
-              className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               autoComplete="current-password"
             />
           </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              New password <span className="text-red-500">*</span>
+              New password <span className="text-danger-600">*</span>
             </label>
-            <input
+            <Input
               type="password"
               required
               minLength={12}
               value={form.new_password}
               onChange={(e) => set('new_password', e.target.value)}
-              className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               autoComplete="new-password"
             />
             <p className="mt-1 text-xs text-gray-400">Minimum 12 characters</p>
@@ -128,27 +124,22 @@ export default function ProfilePage() {
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Confirm new password <span className="text-red-500">*</span>
+              Confirm new password <span className="text-danger-600">*</span>
             </label>
-            <input
+            <Input
               type="password"
               required
               minLength={12}
               value={form.confirm_password}
               onChange={(e) => set('confirm_password', e.target.value)}
-              className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               autoComplete="new-password"
             />
           </div>
 
           <div className="flex justify-end pt-2">
-            <button
-              type="submit"
-              disabled={saving}
-              className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
-            >
+            <Button type="submit" disabled={saving}>
               {saving ? 'Saving…' : 'Change password'}
-            </button>
+            </Button>
           </div>
         </form>
       </div>
