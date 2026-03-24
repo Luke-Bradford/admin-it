@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Breadcrumb from './Breadcrumb';
+import Button from './ui/Button';
 
 function TopBar() {
   const navigate = useNavigate();
@@ -13,8 +14,15 @@ function TopBar() {
     const token = localStorage.getItem('token');
     if (!token) return;
 
+    const parts = token.split('.');
+    if (parts.length < 3) {
+      localStorage.removeItem('token');
+      navigate('/login');
+      return;
+    }
+
     try {
-      const payload = JSON.parse(atob(token.split('.')[1]));
+      const payload = JSON.parse(atob(parts[1]));
       if (payload.username) {
         setUsername(payload.username);
       } else {
@@ -35,22 +43,21 @@ function TopBar() {
   };
 
   return (
-    <div className="flex items-center justify-between h-14 px-4 bg-white border-b border-gray-200 shrink-0">
-      <Breadcrumb />
+    <div className="flex items-center h-14 px-4 bg-white border-b border-gray-200 shrink-0 gap-4">
+      <div className="flex-1 min-w-0">
+        <Breadcrumb />
+      </div>
       {username && (
-        <div className="flex items-center gap-3 ml-auto">
+        <div className="flex items-center gap-2 shrink-0">
           <Link
             to="/profile"
             className="text-sm text-gray-600 hover:text-gray-900 transition-colors"
           >
             {username}
           </Link>
-          <button
-            onClick={handleLogout}
-            className="text-sm text-gray-500 hover:text-gray-800 transition-colors"
-          >
+          <Button variant="ghost" size="sm" type="button" onClick={handleLogout}>
             Sign out
-          </button>
+          </Button>
         </div>
       )}
     </div>

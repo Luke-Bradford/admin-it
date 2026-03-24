@@ -8,6 +8,7 @@ const SEGMENT_LABELS = {
   connections: 'Connections',
   users: 'Users',
   audit: 'Audit Log',
+  profile: 'Profile',
 };
 
 export default function Breadcrumb() {
@@ -15,15 +16,12 @@ export default function Breadcrumb() {
 
   const segments = pathname.split('/').filter(Boolean);
 
-  // Only render if there's more than one segment (i.e. not just root-level pages).
-  if (segments.length <= 1) return null;
+  if (segments.length === 0) return null;
 
   const crumbs = segments.map((seg, i) => {
     const path = '/' + segments.slice(0, i + 1).join('/');
     // Known segments map to human-readable labels. Dynamic segments (e.g. a
-    // connection slug at /connections/<name>) fall back to the raw URL segment.
-    // Phase 2 route components should populate SEGMENT_LABELS or pass a
-    // display name via router state if the slug is not user-friendly.
+    // future connection detail at /connections/<id>) fall back to the raw segment.
     const label = SEGMENT_LABELS[seg] ?? decodeURIComponent(seg);
     const isLast = i === segments.length - 1;
 
