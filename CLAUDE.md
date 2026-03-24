@@ -20,6 +20,19 @@ ruff format --check .  # Format check — must exit 0
 
 If format check fails, run `ruff format .` to auto-fix, then re-check.
 
+### Self-review (re-read the diff before opening the PR)
+- [ ] Any SQL identifier appearing in a dynamic/f-string SQL template is bracket-quoted `[name]`
+- [ ] Any field accepting a bounded set of values uses `Literal[...]`, not bare `str`
+- [ ] Dynamic dict keys that reach a SQL template are allowlisted against a constant before use
+- [ ] No endpoint silently returns 2xx for a no-op where a 4xx is more informative (e.g. PATCH with all-None body, DELETE on already-inactive record)
+- [ ] All new endpoints have explicit role checks — authentication ≠ authorisation
+
+### Responding to review comments
+- Fix every BLOCKING and WARNING before pushing the follow-up commit.
+- For any WARNING not fixed: open a GitHub `tech-debt` issue and reference it in the reply **before merging**. Do not merge with an unresolved WARNING and no tracking issue.
+- For NITPICK: fix if trivial, otherwise open a `tech-debt` issue. Never silently discard.
+- Reply to each comment individually with what was done + the commit SHA.
+
 ---
 
 ## Known CI gotchas
