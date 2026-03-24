@@ -166,6 +166,7 @@ function StepConnection({ onSaved, initial }) {
       onSaved(body.connection);
     } catch (e) {
       setFeedback({ type: 'error', message: e.message });
+    } finally {
       setLoading(false);
     }
   }
@@ -254,18 +255,20 @@ function StepConnection({ onSaved, initial }) {
           Database <span className="text-danger-600">*</span>
         </label>
         <div className="flex gap-2">
-          <Select
+          <Input
+            type="text"
+            required
             value={form.database}
             onChange={(e) => set('database', e.target.value)}
+            placeholder="Type a name or use Discover"
+            list="db-list"
             className="flex-1"
-          >
-            <option value="">Select a database…</option>
+          />
+          <datalist id="db-list">
             {availableDatabases.map((db) => (
-              <option key={db} value={db}>
-                {db}
-              </option>
+              <option key={db} value={db} />
             ))}
-          </Select>
+          </datalist>
           <Button
             type="button"
             variant="secondary"
@@ -277,7 +280,8 @@ function StepConnection({ onSaved, initial }) {
           </Button>
         </div>
         <p className="mt-1 text-xs text-gray-400">
-          Fill in host and credentials first, then click Discover to list available databases.
+          Type the database name directly, or fill in host and credentials then click Discover to
+          pick from available databases.
         </p>
       </div>
 
@@ -333,6 +337,7 @@ function StepDeploy({ onDeployed }) {
       onDeployed();
     } catch (e) {
       setFeedback({ type: 'error', message: e.message });
+    } finally {
       setLoading(false);
     }
   }
@@ -399,6 +404,7 @@ function StepCreateAdmin({ onCreated }) {
       onCreated();
     } catch (e) {
       setFeedback({ type: 'error', message: e.message });
+    } finally {
       setLoading(false);
     }
   }
@@ -485,6 +491,9 @@ const STEPS = [
   { label: 'Admin user' },
 ];
 
+// Sentinel value indicating all steps are complete.
+const COMPLETE_STEP = STEPS.length + 1;
+
 export default function SetupPage() {
   const navigate = useNavigate();
 
@@ -535,15 +544,17 @@ export default function SetupPage() {
         const conn = setup.connection;
         setSavedConnection(conn);
 
-        // Check schema and admin status.
-        const [deployRes, adminRes] = await Promise.all([
-          fetch('/api/setup/deploy-status').then((r) => r.json()),
-          fetch('/api/setup/admin-status').then((r) => r.json()),
-        ]);
+        // Check schema deploy status first; only check admin-status if deployed.
+        const deployRes = await fetch('/api/setup/deploy-status').then((r) => r.json());
 
         if (!deployRes.deployed) {
           setStep(2);
-        } else if (!adminRes.present) {
+          return;
+        }
+
+        const adminRes = await fetch('/api/setup/admin-status').then((r) => r.json());
+
+        if (!adminRes.present) {
           setStep(3);
         } else {
           // Fully configured — send to dashboard.
@@ -568,7 +579,7 @@ export default function SetupPage() {
   }
 
   function handleAdminCreated() {
-    setStep(4); // past the last step — show completion screen
+    setStep(COMPLETE_STEP);
   }
 
   // Loading state
@@ -580,7 +591,7 @@ export default function SetupPage() {
     );
   }
 
-  const isComplete = step > STEPS.length;
+  const isComplete = step === COMPLETE_STEP;
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center py-12 px-4">

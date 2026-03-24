@@ -1,6 +1,7 @@
 // src/components/Layout.jsx
-// Minimal wrapper used by the setup route. The setup page manages its own
-// full-page layout and no longer needs a shared header.
+// Passthrough wrapper used by App.jsx route definitions. Previously rendered a
+// legacy Header component; that has been removed — each page now owns its own
+// layout. This component is kept to avoid touching App.jsx in this PR.
 import React from 'react';
 
 export default function Layout({ children }) {
