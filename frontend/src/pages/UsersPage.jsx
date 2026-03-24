@@ -599,12 +599,14 @@ export default function UsersPage() {
                     {isAdmin && (
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-3">
-                          <button
-                            onClick={() => setModal({ type: 'edit-role', target: u })}
-                            className="text-sm text-blue-600 hover:text-blue-800 transition-colors"
-                          >
-                            Edit role
-                          </button>
+                          {u.is_active && (
+                            <button
+                              onClick={() => setModal({ type: 'edit-role', target: u })}
+                              className="text-sm text-blue-600 hover:text-blue-800 transition-colors"
+                            >
+                              Edit role
+                            </button>
+                          )}
                           {isSystemAdmin && u.is_active && !isSelf(u) && (
                             <button
                               onClick={() => setModal({ type: 'deactivate', target: u })}
