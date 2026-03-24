@@ -6,11 +6,12 @@ from datetime import datetime, timedelta, timezone
 import jwt as pyjwt  # PyJWT
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from app import settings
 from app.db import fetch_secret
+from app.utils.auth_dependency import verify_token
 from app.utils.db_helpers import get_config_and_engine
 from app.utils.password import hash_password, needs_rehash, verify_password
 
@@ -159,3 +160,56 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
         roles = [r[0] for r in roles_result]
 
         return UserInfo(user_id=user_id, username=user_result.Username, roles=roles)
+
+
+# ---------------------------------------------------------------------------
+# POST /api/auth/change-password
+# ---------------------------------------------------------------------------
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=12)
+
+
+@router.post("/change-password", status_code=204)
+def change_password(body: ChangePasswordRequest, user: dict = Depends(verify_token)):
+    config, engine = get_config_and_engine()
+    schema = config.schema
+    uid = user["user_id"]
+
+    with engine.begin() as conn:
+        row = conn.execute(
+            text(f"""
+                SELECT u.PasswordHash, us.Salt
+                FROM [{schema}].[Users] u
+                JOIN [{schema}].[UserSecrets] us ON us.UserId = u.UserId
+                WHERE u.UserId = :uid
+            """),
+            {"uid": uid},
+        ).fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        stored_hash, salt = row[0], row[1]
+
+        if not verify_password(body.current_password, stored_hash, salt):
+            raise HTTPException(status_code=400, detail="Current password is incorrect")
+
+        new_hash = hash_password(body.new_password)
+
+        conn.execute(
+            text(f"""
+                UPDATE [{schema}].[Users]
+                SET PasswordHash = :new_hash, ModifiedDate = :now
+                WHERE UserId = :uid
+            """),
+            {"new_hash": new_hash, "now": datetime.now(timezone.utc), "uid": uid},
+        )
+
+        # Ensure Salt is cleared (argon2id embeds salt in the hash string).
+        conn.execute(
+            text(f"UPDATE [{schema}].[UserSecrets] SET Salt = '' WHERE UserId = :uid"),
+            {"uid": uid},
+        )

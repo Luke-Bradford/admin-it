@@ -8,6 +8,7 @@ import RequireAuth from './components/RequireAuth';
 import Dashboard from './pages/Dashboard';
 import ConnectionsPage from './pages/ConnectionsPage';
 import UsersPage from './pages/UsersPage';
+import ProfilePage from './pages/ProfilePage';
 import Layout from './components/Layout';
 import AppShell from './components/AppShell';
 import ProtectedSetupRoute from './components/ProtectedSetupRoute';
@@ -112,6 +113,17 @@ export default function App() {
             <RequireAuth>
               <AppShell>
                 <ComingSoon title="Audit Log" />
+              </AppShell>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/profile"
+          element={
+            <RequireAuth>
+              <AppShell>
+                <ProfilePage />
               </AppShell>
             </RequireAuth>
           }

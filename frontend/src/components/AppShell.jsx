@@ -1,7 +1,7 @@
 // src/components/AppShell.jsx
 // Layout for all authenticated pages: sidebar + top bar + scrollable main area.
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Breadcrumb from './Breadcrumb';
 
@@ -39,7 +39,12 @@ function TopBar() {
       <Breadcrumb />
       {username && (
         <div className="flex items-center gap-3 ml-auto">
-          <span className="text-sm text-gray-600">{username}</span>
+          <Link
+            to="/profile"
+            className="text-sm text-gray-600 hover:text-gray-900 transition-colors"
+          >
+            {username}
+          </Link>
           <button
             onClick={handleLogout}
             className="text-sm text-gray-500 hover:text-gray-800 transition-colors"
