@@ -57,7 +57,7 @@ const NAV_ITEMS = [
         />
       </svg>
     ),
-    implemented: false,
+    implemented: true,
   },
   {
     label: 'Audit Log',
