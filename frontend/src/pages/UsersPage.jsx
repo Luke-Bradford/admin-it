@@ -1,5 +1,6 @@
 // src/pages/UsersPage.jsx
 import React, { useContext, useEffect, useReducer, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { UserContext } from '../context/UserContext';
 
 const ADMIN_ROLES = new Set(['Admin', 'SystemAdmin']);
@@ -67,6 +68,7 @@ function AddUserModal({ user: callerUser, onClose, onAdded }) {
         setSaving(false);
         return;
       }
+      setSaving(false);
       onAdded(data);
     } catch {
       setError('Network error. Please try again.');
@@ -195,7 +197,9 @@ function AddUserModal({ user: callerUser, onClose, onAdded }) {
 // ---------------------------------------------------------------------------
 
 function EditRoleModal({ target, callerUser, onClose, onSaved }) {
-  const [role, setRole] = useState(target.roles[0] ?? 'EndUser');
+  const roles = assignableRoles(callerUser);
+  const initialRole = roles.includes(target.roles[0]) ? target.roles[0] : (roles[0] ?? 'EndUser');
+  const [role, setRole] = useState(initialRole);
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
 
@@ -216,14 +220,13 @@ function EditRoleModal({ target, callerUser, onClose, onSaved }) {
         setSaving(false);
         return;
       }
+      setSaving(false);
       onSaved({ ...target, roles: [role] });
     } catch {
       setError('Network error. Please try again.');
       setSaving(false);
     }
   }
-
-  const roles = assignableRoles(callerUser);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
@@ -422,6 +425,7 @@ export default function UsersPage() {
   const callerUser = useContext(UserContext);
   const isAdmin = hasRole(callerUser, ADMIN_ROLES);
   const isSystemAdmin = hasRole(callerUser, SYSTEM_ADMIN_ROLES);
+  const navigate = useNavigate();
 
   const [state, dispatch] = useReducer(usersReducer, {
     loading: true,
@@ -435,12 +439,17 @@ export default function UsersPage() {
     dispatch({ type: 'LOADING' });
     fetch('/api/users', { headers: authHeader() })
       .then((r) => {
+        if (r.status === 401) {
+          localStorage.removeItem('token');
+          navigate('/login', { replace: true });
+          throw new Error('Session expired');
+        }
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       })
       .then((data) => dispatch({ type: 'LOADED', payload: data }))
       .catch((err) => dispatch({ type: 'ERROR', payload: err.message }));
-  }, []);
+  }, [navigate]);
 
   function handleAdded(data) {
     // POST returns { id, username, email, role } — normalise to list shape
