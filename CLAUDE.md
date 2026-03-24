@@ -25,6 +25,7 @@ If format check fails, run `ruff format .` to auto-fix, then re-check.
 - [ ] Any field accepting a bounded set of values uses `Literal[...]`, not bare `str`
 - [ ] Dynamic dict keys that reach a SQL template are allowlisted against a constant before use
 - [ ] No endpoint silently returns 2xx for a no-op where a 4xx is more informative (e.g. PATCH with all-None body, DELETE on already-inactive record)
+- [ ] Multi-step logic that reads DB state then mutates uses pre-flight reads — fetch counts/roles/flags once before any `UPDATE`/`INSERT`/`DELETE` so all guards evaluate the same snapshot
 - [ ] All new endpoints have explicit role checks — authentication ≠ authorisation
 
 ### Responding to review comments
