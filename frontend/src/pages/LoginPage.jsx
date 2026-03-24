@@ -71,7 +71,7 @@ function LoginPage() {
           />
         </div>
 
-        <Button type="submit" className="w-full justify-center">
+        <Button type="submit" className="w-full">
           Sign in
         </Button>
       </form>

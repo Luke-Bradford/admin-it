@@ -103,7 +103,7 @@ function ConnectionModal({ mode, initial, onClose, onSaved }) {
 
   return (
     <Modal title={title} onClose={onClose} size="lg" disableClose={saving}>
-      <form id="connection-form" onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit}>
         <ModalBody className="space-y-4">
           {error && (
             <div className="rounded bg-danger-50 border border-danger-200 px-3 py-2 text-sm text-danger-700">
