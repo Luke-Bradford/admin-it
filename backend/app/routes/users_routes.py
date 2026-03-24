@@ -3,6 +3,7 @@
 import logging
 import uuid
 from datetime import datetime, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -31,17 +32,24 @@ ROLE_PRECEDENCE = {
 # ---------------------------------------------------------------------------
 
 
+RoleName = Literal["EndUser", "Admin", "SystemAdmin"]
+
+# Columns allowed in the dynamic PATCH SET clause — prevents any possibility
+# of an unexpected key reaching the raw SQL template.
+PATCHABLE_COLUMNS = {"Username", "Email", "IsActive"}
+
+
 class UserCreate(BaseModel):
     username: str = Field(..., min_length=1, max_length=100)
     email: str = Field(..., min_length=1, max_length=255)
     password: str = Field(..., min_length=12)
-    role: str = Field(..., min_length=1)
+    role: RoleName
 
 
 class UserPatch(BaseModel):
     username: str | None = Field(None, min_length=1, max_length=100)
     email: str | None = Field(None, min_length=1, max_length=255)
-    role: str | None = None
+    role: RoleName | None = None
     is_active: bool | None = None
 
 
@@ -311,7 +319,9 @@ def update_user(user_id: str, body: UserPatch, user: dict = Depends(verify_token
             updates["IsActive"] = 1 if body.is_active else 0
 
         if updates:
-            set_clause = ", ".join(f"{col} = :{col}" for col in updates)
+            if not updates.keys() <= PATCHABLE_COLUMNS:
+                raise HTTPException(status_code=500, detail="Internal error")
+            set_clause = ", ".join(f"[{col}] = :{col}" for col in updates)
             params = {**updates, "uid": uid, "mid": user["user_id"], "now": now}
             conn.execute(
                 text(f"""
@@ -389,6 +399,8 @@ def deactivate_user(user_id: str, user: dict = Depends(verify_token)):
         ).fetchone()
         if not existing:
             raise HTTPException(status_code=404, detail="User not found")
+        if not existing[0]:
+            raise HTTPException(status_code=409, detail="User is already inactive")
 
         # Cannot deactivate the last active SystemAdmin
         current_roles = conn.execute(
