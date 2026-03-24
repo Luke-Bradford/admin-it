@@ -268,6 +268,19 @@ def update_user(user_id: str, body: UserPatch, user: dict = Depends(verify_token
         if not existing:
             raise HTTPException(status_code=404, detail="User not found")
 
+        # Fetch current roles and active SystemAdmin count once, before any mutations,
+        # so all guards evaluate against the pre-UPDATE state of the database.
+        target_current_roles = conn.execute(
+            text(f"""
+                SELECT r.RoleName FROM [{schema}].[UserRoles] ur
+                JOIN [{schema}].[Roles] r ON r.RoleId = ur.RoleId
+                WHERE ur.UserId = :uid
+            """),
+            {"uid": uid},
+        ).fetchall()
+        target_is_system_admin = any(r[0] == "SystemAdmin" for r in target_current_roles)
+        sa_count = _count_active_system_admins(conn, schema) if target_is_system_admin else None
+
         # Build the SET clause dynamically from provided fields only
         updates: dict[str, object] = {}
         if body.username is not None:
@@ -300,18 +313,8 @@ def update_user(user_id: str, body: UserPatch, user: dict = Depends(verify_token
             if not body.is_active and uid == user["user_id"]:
                 raise HTTPException(status_code=403, detail="You cannot deactivate your own account")
             # Cannot deactivate the last active SystemAdmin
-            if not body.is_active:
-                sa_count = _count_active_system_admins(conn, schema)
-                current_roles = conn.execute(
-                    text(f"""
-                        SELECT r.RoleName FROM [{schema}].[UserRoles] ur
-                        JOIN [{schema}].[Roles] r ON r.RoleId = ur.RoleId
-                        WHERE ur.UserId = :uid
-                    """),
-                    {"uid": uid},
-                ).fetchall()
-                is_system_admin = any(r[0] == "SystemAdmin" for r in current_roles)
-                if is_system_admin and sa_count <= 1:
+            if not body.is_active and target_is_system_admin:
+                if sa_count is not None and sa_count <= 1:
                     raise HTTPException(
                         status_code=403,
                         detail="Cannot deactivate the last active SystemAdmin",
@@ -336,19 +339,11 @@ def update_user(user_id: str, body: UserPatch, user: dict = Depends(verify_token
         if body.role is not None:
             role_id = _fetch_role_id(conn, schema, body.role)
 
-            # Prevent role change that would leave no active SystemAdmin
-            current_roles = conn.execute(
-                text(f"""
-                    SELECT r.RoleName FROM [{schema}].[UserRoles] ur
-                    JOIN [{schema}].[Roles] r ON r.RoleId = ur.RoleId
-                    WHERE ur.UserId = :uid
-                """),
-                {"uid": uid},
-            ).fetchall()
-            is_currently_system_admin = any(r[0] == "SystemAdmin" for r in current_roles)
-            if is_currently_system_admin and body.role != "SystemAdmin":
-                sa_count = _count_active_system_admins(conn, schema)
-                if sa_count <= 1:
+            # Prevent role change that would leave no active SystemAdmin.
+            # Uses the pre-UPDATE sa_count to avoid a false 403 when is_active=false
+            # is submitted alongside the role demotion in the same request.
+            if target_is_system_admin and body.role != "SystemAdmin":
+                if sa_count is not None and sa_count <= 1:
                     raise HTTPException(
                         status_code=403,
                         detail="Cannot change the role of the last active SystemAdmin",
