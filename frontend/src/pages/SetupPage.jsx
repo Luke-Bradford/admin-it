@@ -642,7 +642,7 @@ export default function SetupPage() {
                     savedConnection
                       ? {
                           host: savedConnection.db_host,
-                          useLocalhostAlias: false,
+                          useLocalhostAlias: savedConnection.use_localhost_alias ?? false,
                           port: String(savedConnection.db_port),
                           user: savedConnection.db_user,
                           password: '',
