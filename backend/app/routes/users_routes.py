@@ -256,6 +256,9 @@ def update_user(user_id: str, body: UserPatch, user: dict = Depends(verify_token
     schema = config.schema
     now = datetime.now(timezone.utc)
 
+    if body.username is None and body.email is None and body.role is None and body.is_active is None:
+        raise HTTPException(status_code=422, detail="Request body must include at least one field to update")
+
     with engine.begin() as conn:
         existing = conn.execute(
             text(f"""
