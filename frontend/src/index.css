@@ -1,3 +1,17 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  body {
+    @apply font-sans text-gray-900 bg-gray-50 antialiased;
+  }
+
+  /* Reset Vite scaffold default that centres everything */
+  #root {
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    text-align: left;
+  }
+}

@@ -1,9 +1,14 @@
 // src/pages/ConnectionsPage.jsx
 import React, { useContext, useEffect, useReducer, useRef, useState } from 'react';
 import { UserContext } from '../context/UserContext';
+import { authHeader } from '../utils/auth';
+import Button from '../components/ui/Button';
+import Input, { Select } from '../components/ui/Input';
+import Modal, { ModalBody, ModalFooter } from '../components/ui/Modal';
+import EmptyState from '../components/ui/EmptyState';
 
 const ADMIN_ROLES = new Set(['Admin', 'SystemAdmin']);
-const SYSTEM_ADMIN_ROLES = new Set(['SystemAdmin']);
+const SYSTEM_ADMIN_ROLES = new Set(['Admin', 'SystemAdmin']);
 
 const ODBC_DRIVERS = ['ODBC Driver 17 for SQL Server', 'ODBC Driver 18 for SQL Server'];
 
@@ -20,11 +25,6 @@ const DEFAULT_FORM = {
 function hasRole(user, roleSet) {
   if (!user?.roles) return false;
   return user.roles.some((r) => roleSet.has(r));
-}
-
-function authHeader() {
-  const token = localStorage.getItem('token');
-  return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 // ---------------------------------------------------------------------------
@@ -68,7 +68,6 @@ function ConnectionModal({ mode, initial, onClose, onSaved }) {
       odbc_driver: form.odbc_driver,
     };
 
-    // Only include password if provided (edit: blank means "keep existing")
     if (form.db_password) {
       payload.db_password = form.db_password;
     } else if (mode === 'add') {
@@ -92,6 +91,7 @@ function ConnectionModal({ mode, initial, onClose, onSaved }) {
         setSaving(false);
         return;
       }
+      setSaving(false);
       onSaved(data);
     } catch {
       setError('Network error. Please try again.');
@@ -102,48 +102,26 @@ function ConnectionModal({ mode, initial, onClose, onSaved }) {
   const title = mode === 'add' ? 'Add connection' : 'Edit connection';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-lg mx-4">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-          <h2 className="text-base font-semibold text-gray-900">{title}</h2>
-          <button
-            onClick={onClose}
-            className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
-            aria-label="Close"
-          >
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-              viewBox="0 0 24 24"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        {/* Form — footer is inside so Save is a proper submit control */}
-        <form id="connection-form" onSubmit={handleSubmit} className="px-6 py-4 space-y-4">
+    <Modal title={title} onClose={onClose} size="lg">
+      <form id="connection-form" onSubmit={handleSubmit}>
+        <ModalBody className="space-y-4">
           {error && (
-            <div className="rounded bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
+            <div className="rounded bg-danger-50 border border-danger-200 px-3 py-2 text-sm text-danger-700">
               {error}
             </div>
           )}
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Display name <span className="text-red-500">*</span>
+              Display name <span className="text-danger-600">*</span>
             </label>
-            <input
+            <Input
               ref={firstInputRef}
               type="text"
               required
               maxLength={255}
               value={form.name}
               onChange={(e) => set('name', e.target.value)}
-              className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="e.g. Production ERP"
             />
           </div>
@@ -151,43 +129,40 @@ function ConnectionModal({ mode, initial, onClose, onSaved }) {
           <div className="grid grid-cols-3 gap-3">
             <div className="col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Host <span className="text-red-500">*</span>
+                Host <span className="text-danger-600">*</span>
               </label>
-              <input
+              <Input
                 type="text"
                 required
                 value={form.host}
                 onChange={(e) => set('host', e.target.value)}
-                className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="e.g. 192.168.1.10"
               />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Port <span className="text-red-500">*</span>
+                Port <span className="text-danger-600">*</span>
               </label>
-              <input
+              <Input
                 type="number"
                 required
                 min={1}
                 max={65535}
                 value={form.port}
                 onChange={(e) => set('port', e.target.value)}
-                className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
           </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Database name <span className="text-red-500">*</span>
+              Database name <span className="text-danger-600">*</span>
             </label>
-            <input
+            <Input
               type="text"
               required
               value={form.database}
               onChange={(e) => set('database', e.target.value)}
-              className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="e.g. MyDatabase"
             />
           </div>
@@ -195,31 +170,29 @@ function ConnectionModal({ mode, initial, onClose, onSaved }) {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Username <span className="text-red-500">*</span>
+                Username <span className="text-danger-600">*</span>
               </label>
-              <input
+              <Input
                 type="text"
                 required
                 value={form.db_user}
                 onChange={(e) => set('db_user', e.target.value)}
-                className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="SQL login"
                 autoComplete="username"
               />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Password{mode === 'add' && <span className="text-red-500"> *</span>}
+                Password{mode === 'add' && <span className="text-danger-600"> *</span>}
                 {mode === 'edit' && (
                   <span className="text-gray-400 font-normal"> (leave blank to keep)</span>
                 )}
               </label>
-              <input
+              <Input
                 type="password"
                 required={mode === 'add'}
                 value={form.db_password}
                 onChange={(e) => set('db_password', e.target.value)}
-                className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 autoComplete="new-password"
               />
             </div>
@@ -227,40 +200,26 @@ function ConnectionModal({ mode, initial, onClose, onSaved }) {
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">ODBC driver</label>
-            <select
-              value={form.odbc_driver}
-              onChange={(e) => set('odbc_driver', e.target.value)}
-              className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
+            <Select value={form.odbc_driver} onChange={(e) => set('odbc_driver', e.target.value)}>
               {ODBC_DRIVERS.map((d) => (
                 <option key={d} value={d}>
                   {d}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
+        </ModalBody>
 
-          {/* Footer — inside the form so Save is a native submit button */}
-          <div className="flex justify-end gap-3 pt-2 border-t border-gray-200 -mx-6 px-6 pb-0 mt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={saving}
-              className="px-4 py-2 text-sm border border-gray-300 rounded text-gray-700 hover:bg-gray-100 disabled:opacity-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
-            >
-              {saving ? 'Saving…' : mode === 'add' ? 'Add connection' : 'Save changes'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        <ModalFooter>
+          <Button variant="secondary" type="button" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={saving}>
+            {saving ? 'Saving…' : mode === 'add' ? 'Add connection' : 'Save changes'}
+          </Button>
+        </ModalFooter>
+      </form>
+    </Modal>
   );
 }
 
@@ -294,45 +253,32 @@ function DeleteModal({ connection, onClose, onDeleted }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
-        <div className="px-6 py-4 border-b border-gray-200">
-          <h2 className="text-base font-semibold text-gray-900">Delete connection</h2>
-        </div>
-        <div className="px-6 py-4">
-          {error && (
-            <div className="mb-3 rounded bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
-              {error}
-            </div>
-          )}
-          <p className="text-sm text-gray-700">
-            Are you sure you want to delete <span className="font-semibold">{connection.name}</span>
-            ? This will deactivate the connection. Historical data is preserved.
-          </p>
-        </div>
-        <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-lg">
-          <button
-            onClick={onClose}
-            disabled={deleting}
-            className="px-4 py-2 text-sm border border-gray-300 rounded text-gray-700 hover:bg-gray-100 disabled:opacity-50"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleDelete}
-            disabled={deleting}
-            className="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
-          >
-            {deleting ? 'Deleting…' : 'Delete'}
-          </button>
-        </div>
-      </div>
-    </div>
+    <Modal title="Delete connection" onClose={onClose}>
+      <ModalBody>
+        {error && (
+          <div className="mb-3 rounded bg-danger-50 border border-danger-200 px-3 py-2 text-sm text-danger-700">
+            {error}
+          </div>
+        )}
+        <p className="text-sm text-gray-700">
+          Are you sure you want to delete <span className="font-semibold">{connection.name}</span>?
+          This will deactivate the connection. Historical data is preserved.
+        </p>
+      </ModalBody>
+      <ModalFooter>
+        <Button variant="secondary" onClick={onClose} disabled={deleting}>
+          Cancel
+        </Button>
+        <Button variant="danger" onClick={handleDelete} disabled={deleting}>
+          {deleting ? 'Deleting…' : 'Delete'}
+        </Button>
+      </ModalFooter>
+    </Modal>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Connections state reducer
+// Reducer
 // ---------------------------------------------------------------------------
 
 function connectionsReducer(state, action) {
@@ -377,7 +323,7 @@ export default function ConnectionsPage() {
     connections: [],
   });
 
-  const [modal, setModal] = useState(null); // null | { type: 'add' } | { type: 'edit', connection } | { type: 'delete', connection }
+  const [modal, setModal] = useState(null);
 
   useEffect(() => {
     dispatch({ type: 'LOADING' });
@@ -392,8 +338,6 @@ export default function ConnectionsPage() {
 
   function handleSaved(data) {
     if (modal?.type === 'add') {
-      // Optimistically add using the POST response. Dates are not returned by
-      // the POST endpoint so they render as '—' until a manual refresh.
       dispatch({ type: 'ADD', payload: { created_date: null, modified_date: null, ...data } });
     } else {
       dispatch({ type: 'UPDATE', payload: data });
@@ -418,14 +362,10 @@ export default function ConnectionsPage() {
   return (
     <>
       <div className="space-y-6">
-        {/* Page header */}
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-gray-900">Connections</h1>
           {isAdmin && (
-            <button
-              onClick={() => setModal({ type: 'add' })}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 transition-colors"
-            >
+            <Button onClick={() => setModal({ type: 'add' })}>
               <svg
                 className="w-4 h-4"
                 fill="none"
@@ -436,40 +376,34 @@ export default function ConnectionsPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
               </svg>
               Add connection
-            </button>
+            </Button>
           )}
         </div>
 
-        {/* Table card */}
-        <div className="bg-white shadow rounded-lg overflow-hidden">
+        <div className="bg-white shadow-sm rounded-lg border border-gray-200 overflow-hidden">
           {state.loading && (
             <div className="py-16 text-center text-sm text-gray-400">Loading connections…</div>
           )}
-
           {state.error && (
-            <div className="py-16 text-center text-sm text-red-500">
+            <div className="py-16 text-center text-sm text-danger-600">
               Failed to load connections: {state.error}
             </div>
           )}
-
           {!state.loading && !state.error && state.connections.length === 0 && (
-            <div className="py-16 text-center">
-              <p className="text-sm text-gray-400 mb-1">No connections yet.</p>
-              {isAdmin && (
-                <p className="text-sm text-gray-400">
-                  Click{' '}
+            <EmptyState
+              message="No connections yet."
+              action={
+                isAdmin && (
                   <button
                     onClick={() => setModal({ type: 'add' })}
-                    className="text-blue-600 hover:underline"
+                    className="text-sm text-brand-600 hover:underline"
                   >
                     Add connection
-                  </button>{' '}
-                  to get started.
-                </p>
-              )}
-            </div>
+                  </button>
+                )
+              }
+            />
           )}
-
           {!state.loading && !state.error && state.connections.length > 0 && (
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
@@ -505,14 +439,14 @@ export default function ConnectionsPage() {
                         <div className="flex items-center justify-end gap-3">
                           <button
                             onClick={() => setModal({ type: 'edit', connection: c })}
-                            className="text-sm text-blue-600 hover:text-blue-800 transition-colors"
+                            className="text-sm text-brand-600 hover:text-brand-800 transition-colors"
                           >
                             Edit
                           </button>
                           {isSystemAdmin && (
                             <button
                               onClick={() => setModal({ type: 'delete', connection: c })}
-                              className="text-sm text-red-500 hover:text-red-700 transition-colors"
+                              className="text-sm text-danger-600 hover:text-danger-800 transition-colors"
                             >
                               Delete
                             </button>
@@ -528,7 +462,6 @@ export default function ConnectionsPage() {
         </div>
       </div>
 
-      {/* Modals */}
       {modal?.type === 'add' && (
         <ConnectionModal mode="add" onClose={() => setModal(null)} onSaved={handleSaved} />
       )}

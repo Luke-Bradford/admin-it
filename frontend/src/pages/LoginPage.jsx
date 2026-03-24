@@ -1,5 +1,8 @@
-import { useState } from 'react';
+// src/pages/LoginPage.jsx
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import Button from '../components/ui/Button';
+import Input from '../components/ui/Input';
 
 function LoginPage() {
   const navigate = useNavigate();
@@ -26,40 +29,51 @@ function LoginPage() {
       localStorage.setItem('user', JSON.stringify(payload));
 
       navigate('/dashboard');
+    } else {
+      const data = await res.json().catch(() => ({}));
+      setError(data.detail ?? 'Invalid username or password.');
     }
   };
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100">
-      <form onSubmit={handleLogin} className="bg-white p-6 rounded shadow-md w-full max-w-sm">
-        <h2 className="text-xl font-bold mb-4">Login</h2>
-        {error && <p className="text-red-500 text-sm mb-2">{error}</p>}
-        <div className="mb-4">
-          <label className="block text-sm font-medium">Username</label>
-          <input
+    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50">
+      <form
+        onSubmit={handleLogin}
+        className="bg-white shadow-sm border border-gray-200 rounded-lg p-6 w-full max-w-sm space-y-4"
+      >
+        <h1 className="text-xl font-bold text-gray-900">Sign in</h1>
+
+        {error && (
+          <div className="rounded bg-danger-50 border border-danger-200 px-3 py-2 text-sm text-danger-700">
+            {error}
+          </div>
+        )}
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+          <Input
             type="text"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             required
-            className="w-full mt-1 p-2 border rounded"
+            autoComplete="username"
           />
         </div>
-        <div className="mb-4">
-          <label className="block text-sm font-medium">Password</label>
-          <input
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+          <Input
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
-            className="w-full mt-1 p-2 border rounded"
+            autoComplete="current-password"
           />
         </div>
-        <button
-          type="submit"
-          className="w-full bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700"
-        >
-          Login
-        </button>
+
+        <Button type="submit" className="w-full justify-center">
+          Sign in
+        </Button>
       </form>
     </div>
   );
