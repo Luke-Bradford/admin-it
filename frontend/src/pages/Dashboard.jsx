@@ -15,12 +15,13 @@ function StatCard({ label, value, loading, linkTo, linkLabel }) {
         ) : (
           <p className="text-3xl font-bold text-gray-900">{value}</p>
         )}
-        {linkTo && !loading && (
+        {/* Link always shown when provided — lets the user navigate even if the count failed */}
+        {linkTo && (
           <Link
             to={linkTo}
             className="mt-3 inline-block text-sm text-brand-600 hover:text-brand-800 transition-colors"
           >
-            {linkLabel} →
+            {linkLabel} {'\u2192'}
           </Link>
         )}
       </CardBody>
@@ -37,12 +38,14 @@ export default function Dashboard() {
   useEffect(() => {
     fetch('/api/connections', { headers: authHeader() })
       .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then((data) => setConnections({ loading: false, count: data.length }))
+      .then((data) =>
+        setConnections({ loading: false, count: Array.isArray(data) ? data.length : '—' })
+      )
       .catch(() => setConnections({ loading: false, count: '—' }));
 
     fetch('/api/users', { headers: authHeader() })
       .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then((data) => setUsers({ loading: false, count: data.length }))
+      .then((data) => setUsers({ loading: false, count: Array.isArray(data) ? data.length : '—' }))
       .catch(() => setUsers({ loading: false, count: '—' }));
   }, []);
 
