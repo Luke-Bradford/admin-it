@@ -101,7 +101,7 @@ async def set_db_user_context(request: Request, call_next):
                 )
                 uid = payload.get("sub")
             except Exception:
-                pass
+                logger.debug("[set_db_user_context] JWT decode failed; audit context will be NULL", exc_info=True)
 
         ctx_token = set_current_user(uid)
         try:

@@ -149,14 +149,14 @@ class PostgreSQLBackend:
             ).fetchall()
         return [
             {
-                "id": str(r["id"]),
-                "table_name": r["table_name"],
-                "record_id": str(r["record_id"]) if r["record_id"] else None,
-                "action": r["action"],
-                "changed_by": str(r["changed_by"]) if r["changed_by"] else None,
-                "changed_at": r["changed_at"].isoformat() if r["changed_at"] else None,
-                "old_data": r["old_data"],
-                "new_data": r["new_data"],
+                "id": str(r._mapping["id"]),
+                "table_name": r._mapping["table_name"],
+                "record_id": str(r._mapping["record_id"]) if r._mapping["record_id"] else None,
+                "action": r._mapping["action"],
+                "changed_by": str(r._mapping["changed_by"]) if r._mapping["changed_by"] else None,
+                "changed_at": r._mapping["changed_at"].isoformat() if r._mapping["changed_at"] else None,
+                "old_data": r._mapping["old_data"],
+                "new_data": r._mapping["new_data"],
             }
             for r in rows
         ]

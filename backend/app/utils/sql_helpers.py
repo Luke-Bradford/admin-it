@@ -12,8 +12,13 @@ def quote_ident(schema: str, table: str, db_type: str) -> str:
     Examples:
         quote_ident("adm", "Users", "mssql")    -> [adm].[Users]
         quote_ident("adm", "Users", "postgres")  -> "adm"."Users"
+
+    Raises ValueError for any unrecognised db_type so misuse (e.g. a config
+    typo or an unsupported backend) fails loudly rather than silently returning
+    bracket syntax that is invalid on non-MSSQL databases.
     """
     if db_type == "postgres":
         return f'"{schema}"."{table}"'
-    # Default: MSSQL bracket quoting
-    return f"[{schema}].[{table}]"
+    if db_type == "mssql":
+        return f"[{schema}].[{table}]"
+    raise ValueError(f"Unknown db_type: {db_type!r}. Supported values: 'mssql', 'postgres'.")
