@@ -38,7 +38,7 @@ class CoreBackend(Protocol):
     def get_audit_records(self) -> list[dict]:
         """Return paginated audit records.
 
-        Not yet implemented — placeholder for ticket #76/#77.
+        Not yet implemented — placeholder for ticket #77.
         Raises NotImplementedError on all current backends.
         """
         ...

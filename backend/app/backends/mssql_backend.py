@@ -5,6 +5,8 @@
 # the CoreBackend interface so that routes never import MSSQL-specific helpers
 # directly.
 
+import logging
+
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.sql import text
@@ -12,14 +14,15 @@ from sqlalchemy.sql import text
 from app.database.database_setup import deploy_core_schema, is_core_schema_deployed
 from app.db import DatabaseConfig, get_engine
 
+logger = logging.getLogger(__name__)
+
 
 class MSSQLBackend:
     """SQL Server backend for the admin-it core schema."""
 
-    def __init__(self, config: DatabaseConfig, engine: Engine) -> None:
-        self._config = config
+    def __init__(self, engine: Engine, schema: str) -> None:
         self._engine = engine
-        self.schema: str = config.schema
+        self.schema: str = schema
 
     def get_engine(self) -> Engine:
         return self._engine
@@ -48,7 +51,8 @@ class MSSQLBackend:
             ).fetchone()
         if result:
             return result[0]
-        raise RuntimeError(f"Secret '{secret_type}' not found in schema '{self.schema}'")
+        logger.error("[mssql_backend] Secret '%s' not found in schema '%s'", secret_type, self.schema)
+        raise RuntimeError(f"Secret '{secret_type}' not found.")
 
     def get_audit_records(self) -> list[dict]:
         """Not yet implemented — placeholder for ticket #77.
@@ -62,15 +66,18 @@ def create_mssql_backend(core: dict) -> MSSQLBackend:
     """Build and return an MSSQLBackend from a decrypted core-config dict."""
     from app.utils.host_resolver import resolve_hostname  # local import avoids circularity at module level
 
-    resolved_host = resolve_hostname(core["db_host"], use_localhost_alias=core.get("use_localhost_alias", False))
-    config = DatabaseConfig(
-        server=resolved_host,
-        port=core["db_port"],
-        user=core["db_user"],
-        password=core["db_password"],
-        database=core["db_name"],
-        odbc_driver=core["odbc_driver"],
-        schema=core["schema"],
-    )
+    try:
+        resolved_host = resolve_hostname(core["db_host"], use_localhost_alias=core.get("use_localhost_alias", False))
+        config = DatabaseConfig(
+            server=resolved_host,
+            port=core["db_port"],
+            user=core["db_user"],
+            password=core["db_password"],
+            database=core["db_name"],
+            odbc_driver=core["odbc_driver"],
+            schema=core["schema"],
+        )
+    except KeyError as exc:
+        raise RuntimeError(f"Core config is missing required key: {exc}") from exc
     engine = get_engine(config)
-    return MSSQLBackend(config=config, engine=engine)
+    return MSSQLBackend(engine=engine, schema=config.schema)

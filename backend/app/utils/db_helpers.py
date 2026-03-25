@@ -1,13 +1,18 @@
 # app/utils/db_helpers.py
 
-from app.backends.mssql_backend import MSSQLBackend, create_mssql_backend
+import logging
+
+from app.backends.core_backend import CoreBackend
+from app.backends.mssql_backend import create_mssql_backend
 from app.utils.secure_config import load_core_config
 
+logger = logging.getLogger(__name__)
+
 # Module-level singleton — initialised once at startup, replaced on config change.
-_backend: MSSQLBackend | None = None
+_backend: CoreBackend | None = None
 
 
-def _create_backend(core: dict) -> MSSQLBackend:
+def _create_backend(core: dict) -> CoreBackend:
     """Factory: build the appropriate backend from the decrypted core-config dict.
 
     Currently only 'mssql' is supported.  The 'db_type' key defaults to 'mssql'
@@ -17,11 +22,11 @@ def _create_backend(core: dict) -> MSSQLBackend:
     """
     db_type = core.get("db_type", "mssql")
     if db_type != "mssql":
-        raise RuntimeError(f"Unsupported CORE_DB_TYPE: {db_type!r}. Only 'mssql' is supported in this version.")
+        raise RuntimeError(f"Unsupported db_type: {db_type!r}. Only 'mssql' is supported in this version.")
     return create_mssql_backend(core)
 
 
-def init_engine() -> MSSQLBackend:
+def init_engine() -> CoreBackend:
     """Load config from disk and create the backend singleton.
 
     Called at startup (via lifespan) and after setup config is written.
@@ -34,7 +39,7 @@ def init_engine() -> MSSQLBackend:
     return _backend
 
 
-def get_backend() -> MSSQLBackend:
+def get_backend() -> CoreBackend:
     """Return the cached backend instance.
 
     Raises RuntimeError if not yet initialised — this surfaces as a 503 via
