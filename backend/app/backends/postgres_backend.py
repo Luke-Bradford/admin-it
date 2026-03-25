@@ -10,7 +10,7 @@
 
 import logging
 import os
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from urllib.parse import quote_plus
 
 from sqlalchemy import create_engine, event, text
@@ -160,6 +160,21 @@ class PostgreSQLBackend:
             }
             for r in rows
         ]
+
+
+def set_current_user(uid: str | None) -> "Token[str | None]":
+    """Set the per-request user ID for the Postgres audit trigger.
+
+    Call this at the start of each request; pair with reset_current_user()
+    in a finally block.  Exposed as a public function so callers never
+    need to import the private ContextVar directly.
+    """
+    return _current_user_id.set(uid)
+
+
+def reset_current_user(token: "Token[str | None]") -> None:
+    """Reset the ContextVar to its pre-request state using the token returned by set_current_user()."""
+    _current_user_id.reset(token)
 
 
 def create_postgres_backend(core: dict) -> PostgreSQLBackend:

@@ -68,17 +68,25 @@ async def set_db_user_context(request: Request, call_next):
 
     Decodes the JWT (without verifying expiry — full validation happens inside
     the route via auth_dependency) to extract the user's UUID, then stores it
-    in the postgres_backend._current_user_id ContextVar.  The PostgreSQL
-    backend's 'begin' event listener reads this value and sets the Postgres
-    session variable app.current_user_id so audit triggers can record who made
-    each change.
+    via postgres_backend.set_current_user().  The PostgreSQL backend's 'begin'
+    event listener reads this value and sets the Postgres session variable
+    app.current_user_id so audit triggers can record who made each change.
 
-    For the MSSQL backend this middleware is a no-op: the ContextVar import
-    succeeds but no engine listener is registered, so setting the value has
-    no effect.
+    Skipped entirely when the active backend is not Postgres, so psycopg2 is
+    never imported on MSSQL-only deployments.
     """
     try:
-        from app.backends.postgres_backend import _current_user_id  # noqa: PLC0415
+        from app.utils.db_helpers import get_backend  # noqa: PLC0415
+
+        backend = get_backend()
+    except Exception:
+        return await call_next(request)
+
+    if backend.db_type != "postgres":
+        return await call_next(request)
+
+    try:
+        from app.backends.postgres_backend import reset_current_user, set_current_user  # noqa: PLC0415
 
         uid: str | None = None
         auth_header = request.headers.get("Authorization", "")
@@ -95,11 +103,11 @@ async def set_db_user_context(request: Request, call_next):
             except Exception:
                 pass
 
-        token_ctx = _current_user_id.set(uid)
+        ctx_token = set_current_user(uid)
         try:
             return await call_next(request)
         finally:
-            _current_user_id.reset(token_ctx)
+            reset_current_user(ctx_token)
     except Exception:
         # Never let middleware errors break the request pipeline.
         return await call_next(request)

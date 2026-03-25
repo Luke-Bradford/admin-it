@@ -192,12 +192,12 @@ def create_admin_user(user: AdminUserInput):
             if existing > 0:
                 raise HTTPException(status_code=400, detail="SystemAdmin user already exists.")
 
-            # FETCH FIRST 1 ROW ONLY is ANSI SQL: works on SQL Server 2012+ and PostgreSQL.
+            # RoleName has a UNIQUE constraint so this returns at most one row;
+            # no LIMIT/FETCH needed (and FETCH without ORDER BY breaks on SQL Server).
             role_id = conn.execute(
                 text(f"""
                 SELECT "RoleId" FROM {qi(schema, "Roles", db_type)}
                 WHERE "RoleName" = 'SystemAdmin'
-                FETCH FIRST 1 ROW ONLY
             """)
             ).scalar()
             if not role_id:
