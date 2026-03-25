@@ -507,10 +507,10 @@ This gives the same query interface as the SQL Server audit log — the audit UI
 
 ## Immediate next actions (in order)
 
-Phase 1 hardening is complete. Phase 2 (connection and user management) is in progress — connection management API (#53) and UI (#54) are done. Remaining work in priority order:
+Phase 1 hardening is complete. Phase 2 (connection and user management) is done. Phase 1.5 (frontend overhaul) is done. Remaining work in priority order:
 
-1. **#55 / #56 — User management API + UI** — minimum viable admin handoff
-2. **#57 — User profile & password change** — basic user self-service
-3. **#71–#74 — Frontend overhaul (Phase 1.5)** — design quality pass before the product is shown to real users
-4. **#75–#79 — Multi-database core (Phase 2.5)** — PostgreSQL support and smarter setup wizard
+1. **#76 — PostgreSQL backend for the core schema** — implement PostgreSQLBackend behind the CoreBackend interface (#75 done)
+2. **#77 — SQL Server: add explicit audit_log table** — application-level audit context temporal tables don't capture
+3. **#78 — Setup wizard: database type picker** — wire new backends into the wizard UI
+4. **#79 — Detect existing install — connect-only mode**
 5. Then Phase 3 (data browser) — the core end-user value
