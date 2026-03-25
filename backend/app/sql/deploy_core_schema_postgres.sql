@@ -1,7 +1,7 @@
 -- deploy_core_schema_postgres.sql
 --
 -- Deploys the admin-it core schema on PostgreSQL.
--- The literal string 'changeme' is replaced with the actual schema name
+-- The literal string '__SCHEMA__' is replaced with the actual schema name
 -- by the Python deployment code before execution.
 --
 -- Requirements:
@@ -18,13 +18,13 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- Create schema if it does not already exist.
-CREATE SCHEMA IF NOT EXISTS "changeme";
+CREATE SCHEMA IF NOT EXISTS "__SCHEMA__";
 
 -- ──────────────────────────────────────────────
 -- CORE TABLES
 -- ──────────────────────────────────────────────
 
-CREATE TABLE IF NOT EXISTS "changeme"."Users" (
+CREATE TABLE IF NOT EXISTS "__SCHEMA__"."Users" (
     "UserId"      UUID         NOT NULL DEFAULT gen_random_uuid(),
     "Username"    VARCHAR(100) NOT NULL,
     "Email"       VARCHAR(255) NOT NULL,
@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS "changeme"."Users" (
     UNIQUE ("Email")
 );
 
-CREATE TABLE IF NOT EXISTS "changeme"."UserSecrets" (
+CREATE TABLE IF NOT EXISTS "__SCHEMA__"."UserSecrets" (
     "UserSecretId" UUID         NOT NULL DEFAULT gen_random_uuid(),
     "UserId"       UUID         NOT NULL,
     "Salt"         VARCHAR(256) NOT NULL,
@@ -48,10 +48,10 @@ CREATE TABLE IF NOT EXISTS "changeme"."UserSecrets" (
     "ModifiedById" UUID,
     "ModifiedDate" TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     PRIMARY KEY ("UserSecretId"),
-    FOREIGN KEY ("UserId") REFERENCES "changeme"."Users" ("UserId")
+    FOREIGN KEY ("UserId") REFERENCES "__SCHEMA__"."Users" ("UserId")
 );
 
-CREATE TABLE IF NOT EXISTS "changeme"."Roles" (
+CREATE TABLE IF NOT EXISTS "__SCHEMA__"."Roles" (
     "RoleId"      UUID         NOT NULL DEFAULT gen_random_uuid(),
     "RoleName"    VARCHAR(100) NOT NULL,
     "CreatedById"  UUID,
@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS "changeme"."Roles" (
     UNIQUE ("RoleName")
 );
 
-CREATE TABLE IF NOT EXISTS "changeme"."UserRoles" (
+CREATE TABLE IF NOT EXISTS "__SCHEMA__"."UserRoles" (
     "UserId"       UUID        NOT NULL,
     "RoleId"       UUID        NOT NULL,
     "AssignedDate" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -71,11 +71,11 @@ CREATE TABLE IF NOT EXISTS "changeme"."UserRoles" (
     "ModifiedById" UUID,
     "ModifiedDate" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY ("UserId", "RoleId"),
-    FOREIGN KEY ("UserId") REFERENCES "changeme"."Users" ("UserId"),
-    FOREIGN KEY ("RoleId") REFERENCES "changeme"."Roles" ("RoleId")
+    FOREIGN KEY ("UserId") REFERENCES "__SCHEMA__"."Users" ("UserId"),
+    FOREIGN KEY ("RoleId") REFERENCES "__SCHEMA__"."Roles" ("RoleId")
 );
 
-CREATE TABLE IF NOT EXISTS "changeme"."Connections" (
+CREATE TABLE IF NOT EXISTS "__SCHEMA__"."Connections" (
     "ConnectionId"   UUID         NOT NULL DEFAULT gen_random_uuid(),
     "Name"           VARCHAR(255) NOT NULL,
     "ConnectionString" TEXT       NOT NULL,
@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS "changeme"."Connections" (
     UNIQUE ("Name")
 );
 
-CREATE TABLE IF NOT EXISTS "changeme"."ConnectionPermissions" (
+CREATE TABLE IF NOT EXISTS "__SCHEMA__"."ConnectionPermissions" (
     "PermissionId"   UUID        NOT NULL DEFAULT gen_random_uuid(),
     "PermissionName" VARCHAR(50) NOT NULL,
     "CreatedById"    UUID,
@@ -99,7 +99,7 @@ CREATE TABLE IF NOT EXISTS "changeme"."ConnectionPermissions" (
     UNIQUE ("PermissionName")
 );
 
-CREATE TABLE IF NOT EXISTS "changeme"."UserConnectionAccess" (
+CREATE TABLE IF NOT EXISTS "__SCHEMA__"."UserConnectionAccess" (
     "UserId"       UUID        NOT NULL,
     "ConnectionId" UUID        NOT NULL,
     "PermissionId" UUID        NOT NULL,
@@ -108,12 +108,12 @@ CREATE TABLE IF NOT EXISTS "changeme"."UserConnectionAccess" (
     "ModifiedById" UUID,
     "ModifiedDate" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY ("UserId", "ConnectionId"),
-    FOREIGN KEY ("UserId")       REFERENCES "changeme"."Users" ("UserId"),
-    FOREIGN KEY ("ConnectionId") REFERENCES "changeme"."Connections" ("ConnectionId"),
-    FOREIGN KEY ("PermissionId") REFERENCES "changeme"."ConnectionPermissions" ("PermissionId")
+    FOREIGN KEY ("UserId")       REFERENCES "__SCHEMA__"."Users" ("UserId"),
+    FOREIGN KEY ("ConnectionId") REFERENCES "__SCHEMA__"."Connections" ("ConnectionId"),
+    FOREIGN KEY ("PermissionId") REFERENCES "__SCHEMA__"."ConnectionPermissions" ("PermissionId")
 );
 
-CREATE TABLE IF NOT EXISTS "changeme"."Secrets" (
+CREATE TABLE IF NOT EXISTS "__SCHEMA__"."Secrets" (
     "SecretId"          UUID         NOT NULL DEFAULT gen_random_uuid(),
     "SecretType"        VARCHAR(100) NOT NULL,
     "SecretDescription" VARCHAR(255),
@@ -130,7 +130,7 @@ CREATE TABLE IF NOT EXISTS "changeme"."Secrets" (
 -- AUDIT LOG
 -- ──────────────────────────────────────────────
 
-CREATE TABLE IF NOT EXISTS "changeme".audit_log (
+CREATE TABLE IF NOT EXISTS "__SCHEMA__"."audit_log" (
     id          UUID         NOT NULL DEFAULT gen_random_uuid(),
     table_name  TEXT         NOT NULL,
     record_id   UUID,
@@ -151,7 +151,7 @@ CREATE TABLE IF NOT EXISTS "changeme".audit_log (
 -- in PostgreSQLBackend.
 -- ──────────────────────────────────────────────
 
-CREATE OR REPLACE FUNCTION "changeme"._audit_trigger()
+CREATE OR REPLACE FUNCTION "__SCHEMA__"._audit_trigger()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 AS $$
@@ -175,7 +175,7 @@ BEGIN
             WHEN 'Secrets'              THEN OLD."SecretId"
             ELSE NULL
         END;
-        INSERT INTO "changeme".audit_log
+        INSERT INTO "__SCHEMA__"."audit_log"
             (table_name, record_id, action, changed_by, old_data, new_data)
         VALUES
             (TG_TABLE_NAME, v_rid, 'DELETE', v_uid, to_jsonb(OLD), NULL);
@@ -188,7 +188,7 @@ BEGIN
             WHEN 'Secrets'              THEN NEW."SecretId"
             ELSE NULL
         END;
-        INSERT INTO "changeme".audit_log
+        INSERT INTO "__SCHEMA__"."audit_log"
             (table_name, record_id, action, changed_by, old_data, new_data)
         VALUES (
             TG_TABLE_NAME,
@@ -210,25 +210,25 @@ $$;
 -- triggers in older Postgres versions) to keep the script idempotent.
 -- ──────────────────────────────────────────────
 
-DROP TRIGGER IF EXISTS _audit ON "changeme"."Users";
+DROP TRIGGER IF EXISTS _audit ON "__SCHEMA__"."Users";
 CREATE TRIGGER _audit
-    AFTER INSERT OR UPDATE OR DELETE ON "changeme"."Users"
-    FOR EACH ROW EXECUTE FUNCTION "changeme"._audit_trigger();
+    AFTER INSERT OR UPDATE OR DELETE ON "__SCHEMA__"."Users"
+    FOR EACH ROW EXECUTE FUNCTION "__SCHEMA__"._audit_trigger();
 
-DROP TRIGGER IF EXISTS _audit ON "changeme"."Connections";
+DROP TRIGGER IF EXISTS _audit ON "__SCHEMA__"."Connections";
 CREATE TRIGGER _audit
-    AFTER INSERT OR UPDATE OR DELETE ON "changeme"."Connections"
-    FOR EACH ROW EXECUTE FUNCTION "changeme"._audit_trigger();
+    AFTER INSERT OR UPDATE OR DELETE ON "__SCHEMA__"."Connections"
+    FOR EACH ROW EXECUTE FUNCTION "__SCHEMA__"._audit_trigger();
 
-DROP TRIGGER IF EXISTS _audit ON "changeme"."ConnectionPermissions";
+DROP TRIGGER IF EXISTS _audit ON "__SCHEMA__"."ConnectionPermissions";
 CREATE TRIGGER _audit
-    AFTER INSERT OR UPDATE OR DELETE ON "changeme"."ConnectionPermissions"
-    FOR EACH ROW EXECUTE FUNCTION "changeme"._audit_trigger();
+    AFTER INSERT OR UPDATE OR DELETE ON "__SCHEMA__"."ConnectionPermissions"
+    FOR EACH ROW EXECUTE FUNCTION "__SCHEMA__"._audit_trigger();
 
-DROP TRIGGER IF EXISTS _audit ON "changeme"."Secrets";
+DROP TRIGGER IF EXISTS _audit ON "__SCHEMA__"."Secrets";
 CREATE TRIGGER _audit
-    AFTER INSERT OR UPDATE OR DELETE ON "changeme"."Secrets"
-    FOR EACH ROW EXECUTE FUNCTION "changeme"._audit_trigger();
+    AFTER INSERT OR UPDATE OR DELETE ON "__SCHEMA__"."Secrets"
+    FOR EACH ROW EXECUTE FUNCTION "__SCHEMA__"._audit_trigger();
 
 -- ──────────────────────────────────────────────
 -- SEED DATA
@@ -236,20 +236,20 @@ CREATE TRIGGER _audit
 -- ──────────────────────────────────────────────
 
 -- Roles
-INSERT INTO "changeme"."Roles" ("RoleId", "RoleName")
+INSERT INTO "__SCHEMA__"."Roles" ("RoleId", "RoleName")
 VALUES (gen_random_uuid(), 'SystemAdmin')
 ON CONFLICT ("RoleName") DO NOTHING;
 
-INSERT INTO "changeme"."Roles" ("RoleId", "RoleName")
+INSERT INTO "__SCHEMA__"."Roles" ("RoleId", "RoleName")
 VALUES (gen_random_uuid(), 'Admin')
 ON CONFLICT ("RoleName") DO NOTHING;
 
-INSERT INTO "changeme"."Roles" ("RoleId", "RoleName")
+INSERT INTO "__SCHEMA__"."Roles" ("RoleId", "RoleName")
 VALUES (gen_random_uuid(), 'EndUser')
 ON CONFLICT ("RoleName") DO NOTHING;
 
 -- Connection permission types
-INSERT INTO "changeme"."ConnectionPermissions" ("PermissionId", "PermissionName")
+INSERT INTO "__SCHEMA__"."ConnectionPermissions" ("PermissionId", "PermissionName")
 VALUES
     (gen_random_uuid(), 'Read'),
     (gen_random_uuid(), 'Write'),
@@ -257,7 +257,7 @@ VALUES
 ON CONFLICT ("PermissionName") DO NOTHING;
 
 -- JWT secret (random 32-byte hex string; generated once, never overwritten)
-INSERT INTO "changeme"."Secrets"
+INSERT INTO "__SCHEMA__"."Secrets"
     ("SecretId", "SecretType", "SecretDescription", "SecretValue")
 VALUES (
     gen_random_uuid(),

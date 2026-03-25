@@ -18,6 +18,8 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.inspection import inspect as sa_inspect
 
+from app.utils.sql_helpers import quote_ident as qi
+
 logger = logging.getLogger(__name__)
 
 # Per-request context variable carrying the authenticated user's UUID string.
@@ -25,6 +27,7 @@ logger = logging.getLogger(__name__)
 _current_user_id: ContextVar[str | None] = ContextVar("pg_current_user_id", default=None)
 
 _SQL_FILE_PATH = os.path.join(os.path.dirname(__file__), "../sql/deploy_core_schema_postgres.sql")
+_SCHEMA_PLACEHOLDER = "__SCHEMA__"
 
 _EXPECTED_TABLES = [
     "Users",
@@ -47,7 +50,6 @@ class PostgreSQLBackend:
     def __init__(self, engine: Engine, schema: str) -> None:
         self._engine = engine
         self.schema: str = schema
-        self.db_type: str = "postgres"
         self._register_begin_listener()
 
     def _register_begin_listener(self) -> None:
@@ -89,7 +91,7 @@ class PostgreSQLBackend:
         with open(_SQL_FILE_PATH, encoding="utf-8") as fh:
             sql = fh.read()
 
-        sql = sql.replace("changeme", self.schema)
+        sql = sql.replace(_SCHEMA_PLACEHOLDER, self.schema)
 
         # psycopg2's cursor.execute() accepts a multi-statement string when
         # called via the raw DBAPI connection (bypassing SQLAlchemy's
@@ -110,8 +112,8 @@ class PostgreSQLBackend:
         """Return True if all expected core-schema tables are present."""
         try:
             inspector = sa_inspect(self._engine)
-            existing = {t.lower() for t in inspector.get_table_names(schema=self.schema)}
-            missing = [t for t in _EXPECTED_TABLES if t.lower() not in existing]
+            existing = set(inspector.get_table_names(schema=self.schema))
+            missing = [t for t in _EXPECTED_TABLES if t not in existing]
             if missing:
                 logger.info("[postgres_backend] Missing tables: %s", missing)
             return len(missing) == 0
@@ -124,7 +126,7 @@ class PostgreSQLBackend:
         schema = self.schema
         with self._engine.connect() as conn:
             result = conn.execute(
-                text(f'SELECT "SecretValue" FROM "{schema}"."Secrets" WHERE "SecretType" = :st'),
+                text(f'SELECT "SecretValue" FROM {qi(schema, "Secrets", "postgres")} WHERE "SecretType" = :st'),
                 {"st": secret_type},
             ).fetchone()
         if result:
@@ -140,7 +142,7 @@ class PostgreSQLBackend:
                 text(f"""
                     SELECT id, table_name, record_id, action,
                            changed_by, changed_at, old_data, new_data
-                    FROM "{schema}".audit_log
+                    FROM {qi(schema, "audit_log", "postgres")}
                     ORDER BY changed_at DESC
                     LIMIT 1000
                 """)
