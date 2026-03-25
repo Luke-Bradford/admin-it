@@ -4,10 +4,12 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+import jwt as pyjwt
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import settings
+from app.routes.audit_routes import router as audit_router
 from app.routes.auth_routes import router as auth_router
 from app.routes.connections_routes import router as connections_router
 from app.routes.discovery_routes import router as discovery_router
@@ -60,6 +62,57 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def set_db_user_context(request: Request, call_next):
+    """Populate the per-request ContextVar used by the PostgreSQL audit trigger.
+
+    Decodes the JWT (without verifying expiry — full validation happens inside
+    the route via auth_dependency) to extract the user's UUID, then stores it
+    via postgres_backend.set_current_user().  The PostgreSQL backend's 'begin'
+    event listener reads this value and sets the Postgres session variable
+    app.current_user_id so audit triggers can record who made each change.
+
+    Skipped entirely when the active backend is not Postgres, so psycopg2 is
+    never imported on MSSQL-only deployments.
+    """
+    try:
+        from app.utils.db_helpers import get_backend  # noqa: PLC0415
+
+        backend = get_backend()
+    except Exception:
+        return await call_next(request)
+
+    if backend.db_type != "postgres":
+        return await call_next(request)
+
+    try:
+        from app.backends.postgres_backend import reset_current_user, set_current_user  # noqa: PLC0415
+
+        uid: str | None = None
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer ") and settings.JWT_SECRET:
+            token = auth_header[len("Bearer ") :]
+            try:
+                payload = pyjwt.decode(
+                    token,
+                    settings.JWT_SECRET,
+                    algorithms=["HS256"],
+                    options={"verify_exp": False},
+                )
+                uid = payload.get("sub")
+            except Exception:
+                logger.debug("[set_db_user_context] JWT decode failed; audit context will be NULL", exc_info=True)
+
+        ctx_token = set_current_user(uid)
+        try:
+            return await call_next(request)
+        finally:
+            reset_current_user(ctx_token)
+    except Exception:
+        logger.warning("[set_db_user_context] Unexpected error in audit-context middleware", exc_info=True)
+        return await call_next(request)
+
+
 @app.get("/ping")
 def ping():
     return {"message": "pong"}
@@ -73,3 +126,4 @@ app.include_router(auth_router, prefix="/api/auth", tags=["Auth"])
 app.include_router(manage_router, prefix="/api/manage", tags=["Manage"])
 app.include_router(connections_router, prefix="/api/connections", tags=["Connections"])
 app.include_router(users_router, prefix="/api/users", tags=["Users"])
+app.include_router(audit_router, prefix="/api/audit", tags=["Audit"])

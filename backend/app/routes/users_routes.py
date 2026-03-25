@@ -12,6 +12,7 @@ from sqlalchemy import text
 from app.utils.auth_dependency import verify_token
 from app.utils.db_helpers import get_backend
 from app.utils.password import hash_password
+from app.utils.sql_helpers import quote_ident as qi
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -79,9 +80,9 @@ def _parse_user_id(raw: str) -> str:
         raise HTTPException(status_code=422, detail="Invalid user ID format")
 
 
-def _fetch_role_id(conn, schema: str, role_name: str) -> str:
+def _fetch_role_id(conn, schema: str, db_type: str, role_name: str) -> str:
     row = conn.execute(
-        text(f"SELECT RoleId FROM [{schema}].[Roles] WHERE RoleName = :name"),
+        text(f'SELECT "RoleId" FROM {qi(schema, "Roles", db_type)} WHERE "RoleName" = :name'),
         {"name": role_name},
     ).fetchone()
     if not row:
@@ -89,15 +90,16 @@ def _fetch_role_id(conn, schema: str, role_name: str) -> str:
     return str(row[0])
 
 
-def _count_active_system_admins(conn, schema: str) -> int:
+def _count_active_system_admins(conn, schema: str, db_type: str) -> int:
     return conn.execute(
         text(f"""
             SELECT COUNT(*)
-            FROM [{schema}].[Users] u
-            JOIN [{schema}].[UserRoles] ur ON ur.UserId = u.UserId
-            JOIN [{schema}].[Roles] r ON r.RoleId = ur.RoleId
-            WHERE r.RoleName = 'SystemAdmin' AND u.IsActive = 1
-        """)
+            FROM {qi(schema, "Users", db_type)} u
+            JOIN {qi(schema, "UserRoles", db_type)} ur ON ur."UserId" = u."UserId"
+            JOIN {qi(schema, "Roles", db_type)} r ON r."RoleId" = ur."RoleId"
+            WHERE r."RoleName" = 'SystemAdmin' AND u."IsActive" = :active
+        """),
+        {"active": True},
     ).scalar()
 
 
@@ -111,23 +113,24 @@ def list_users(user: dict = Depends(verify_token)):
     _require_admin(user)
     backend = get_backend()
     schema = backend.schema
+    db_type = backend.db_type
     engine = backend.get_engine()
 
     with engine.connect() as conn:
         rows = conn.execute(
             text(f"""
                 SELECT
-                    u.UserId,
-                    u.Username,
-                    u.Email,
-                    u.IsActive,
-                    u.CreatedDate,
-                    u.ModifiedDate,
-                    r.RoleName
-                FROM [{schema}].[Users] u
-                LEFT JOIN [{schema}].[UserRoles] ur ON ur.UserId = u.UserId
-                LEFT JOIN [{schema}].[Roles] r ON r.RoleId = ur.RoleId
-                ORDER BY u.Username
+                    u."UserId",
+                    u."Username",
+                    u."Email",
+                    u."IsActive",
+                    u."CreatedDate",
+                    u."ModifiedDate",
+                    r."RoleName"
+                FROM {qi(schema, "Users", db_type)} u
+                LEFT JOIN {qi(schema, "UserRoles", db_type)} ur ON ur."UserId" = u."UserId"
+                LEFT JOIN {qi(schema, "Roles", db_type)} r ON r."RoleId" = ur."RoleId"
+                ORDER BY u."Username"
             """)
         ).fetchall()
 
@@ -170,6 +173,7 @@ def create_user(body: UserCreate, user: dict = Depends(verify_token)):
 
     backend = get_backend()
     schema = backend.schema
+    db_type = backend.db_type
     engine = backend.get_engine()
     now = datetime.now(timezone.utc)
 
@@ -177,26 +181,26 @@ def create_user(body: UserCreate, user: dict = Depends(verify_token)):
         # Duplicate username / email check
         conflict = conn.execute(
             text(f"""
-                SELECT 1 FROM [{schema}].[Users]
-                WHERE Username = :username OR Email = :email
+                SELECT 1 FROM {qi(schema, "Users", db_type)}
+                WHERE "Username" = :username OR "Email" = :email
             """),
             {"username": body.username, "email": body.email},
         ).fetchone()
         if conflict:
             raise HTTPException(status_code=409, detail="Username or email already in use")
 
-        role_id = _fetch_role_id(conn, schema, body.role)
+        role_id = _fetch_role_id(conn, schema, db_type, body.role)
 
         user_id = str(uuid.uuid4())
         hashed = hash_password(body.password)
 
         conn.execute(
             text(f"""
-                INSERT INTO [{schema}].[Users]
-                    (UserId, Username, Email, PasswordHash, IsActive,
-                     CreatedById, CreatedDate, ModifiedById, ModifiedDate)
+                INSERT INTO {qi(schema, "Users", db_type)}
+                    ("UserId", "Username", "Email", "PasswordHash", "IsActive",
+                     "CreatedById", "CreatedDate", "ModifiedById", "ModifiedDate")
                 VALUES
-                    (:uid, :username, :email, :phash, 1,
+                    (:uid, :username, :email, :phash, :active,
                      :cid, :now, :cid, :now)
             """),
             {
@@ -204,6 +208,7 @@ def create_user(body: UserCreate, user: dict = Depends(verify_token)):
                 "username": body.username,
                 "email": body.email,
                 "phash": hashed,
+                "active": True,
                 "cid": user["user_id"],
                 "now": now,
             },
@@ -211,9 +216,9 @@ def create_user(body: UserCreate, user: dict = Depends(verify_token)):
 
         conn.execute(
             text(f"""
-                INSERT INTO [{schema}].[UserSecrets]
-                    (UserSecretId, UserId, Salt,
-                     CreatedById, CreatedDate, ModifiedById, ModifiedDate)
+                INSERT INTO {qi(schema, "UserSecrets", db_type)}
+                    ("UserSecretId", "UserId", "Salt",
+                     "CreatedById", "CreatedDate", "ModifiedById", "ModifiedDate")
                 VALUES
                     (:sid, :uid, '',
                      :cid, :now, :cid, :now)
@@ -223,9 +228,9 @@ def create_user(body: UserCreate, user: dict = Depends(verify_token)):
 
         conn.execute(
             text(f"""
-                INSERT INTO [{schema}].[UserRoles]
-                    (UserId, RoleId, AssignedDate,
-                     CreatedById, CreatedDate, ModifiedById, ModifiedDate)
+                INSERT INTO {qi(schema, "UserRoles", db_type)}
+                    ("UserId", "RoleId", "AssignedDate",
+                     "CreatedById", "CreatedDate", "ModifiedById", "ModifiedDate")
                 VALUES
                     (:uid, :rid, :now,
                      :cid, :now, :cid, :now)
@@ -256,6 +261,7 @@ def update_user(user_id: str, body: UserPatch, user: dict = Depends(verify_token
 
     backend = get_backend()
     schema = backend.schema
+    db_type = backend.db_type
     engine = backend.get_engine()
     now = datetime.now(timezone.utc)
 
@@ -265,9 +271,9 @@ def update_user(user_id: str, body: UserPatch, user: dict = Depends(verify_token
     with engine.begin() as conn:
         existing = conn.execute(
             text(f"""
-                SELECT u.UserId, u.Username, u.Email, u.IsActive
-                FROM [{schema}].[Users] u
-                WHERE u.UserId = :uid
+                SELECT u."UserId", u."Username", u."Email", u."IsActive"
+                FROM {qi(schema, "Users", db_type)} u
+                WHERE u."UserId" = :uid
             """),
             {"uid": uid},
         ).fetchone()
@@ -278,14 +284,14 @@ def update_user(user_id: str, body: UserPatch, user: dict = Depends(verify_token
         # so all guards evaluate against the pre-UPDATE state of the database.
         target_current_roles = conn.execute(
             text(f"""
-                SELECT r.RoleName FROM [{schema}].[UserRoles] ur
-                JOIN [{schema}].[Roles] r ON r.RoleId = ur.RoleId
-                WHERE ur.UserId = :uid
+                SELECT r."RoleName" FROM {qi(schema, "UserRoles", db_type)} ur
+                JOIN {qi(schema, "Roles", db_type)} r ON r."RoleId" = ur."RoleId"
+                WHERE ur."UserId" = :uid
             """),
             {"uid": uid},
         ).fetchall()
         target_is_system_admin = any(r[0] == "SystemAdmin" for r in target_current_roles)
-        sa_count = _count_active_system_admins(conn, schema) if target_is_system_admin else None
+        sa_count = _count_active_system_admins(conn, schema, db_type) if target_is_system_admin else None
 
         # Build the SET clause dynamically from provided fields only
         updates: dict[str, object] = {}
@@ -293,8 +299,8 @@ def update_user(user_id: str, body: UserPatch, user: dict = Depends(verify_token
             # Uniqueness check — exclude the target user from the check
             clash = conn.execute(
                 text(f"""
-                    SELECT 1 FROM [{schema}].[Users]
-                    WHERE Username = :username AND UserId != :uid
+                    SELECT 1 FROM {qi(schema, "Users", db_type)}
+                    WHERE "Username" = :username AND "UserId" != :uid
                 """),
                 {"username": body.username, "uid": uid},
             ).fetchone()
@@ -305,8 +311,8 @@ def update_user(user_id: str, body: UserPatch, user: dict = Depends(verify_token
         if body.email is not None:
             clash = conn.execute(
                 text(f"""
-                    SELECT 1 FROM [{schema}].[Users]
-                    WHERE Email = :email AND UserId != :uid
+                    SELECT 1 FROM {qi(schema, "Users", db_type)}
+                    WHERE "Email" = :email AND "UserId" != :uid
                 """),
                 {"email": body.email, "uid": uid},
             ).fetchone()
@@ -325,25 +331,25 @@ def update_user(user_id: str, body: UserPatch, user: dict = Depends(verify_token
                         status_code=403,
                         detail="Cannot deactivate the last active SystemAdmin",
                     )
-            updates["IsActive"] = 1 if body.is_active else 0
+            updates["IsActive"] = body.is_active
 
         if updates:
             if not updates.keys() <= PATCHABLE_COLUMNS:
                 raise HTTPException(status_code=500, detail="Internal error")
-            set_clause = ", ".join(f"[{col}] = :{col}" for col in updates)
+            set_clause = ", ".join(f'"{col}" = :{col}' for col in updates)
             params = {**updates, "uid": uid, "mid": user["user_id"], "now": now}
             conn.execute(
                 text(f"""
-                    UPDATE [{schema}].[Users]
-                    SET {set_clause}, ModifiedById = :mid, ModifiedDate = :now
-                    WHERE UserId = :uid
+                    UPDATE {qi(schema, "Users", db_type)}
+                    SET {set_clause}, "ModifiedById" = :mid, "ModifiedDate" = :now
+                    WHERE "UserId" = :uid
                 """),
                 params,
             )
 
         # Role update: replace existing role with the new one (DELETE + INSERT)
         if body.role is not None:
-            role_id = _fetch_role_id(conn, schema, body.role)
+            role_id = _fetch_role_id(conn, schema, db_type, body.role)
 
             # Prevent role change that would leave no active SystemAdmin.
             # Uses the pre-UPDATE sa_count to avoid a false 403 when is_active=false
@@ -356,14 +362,14 @@ def update_user(user_id: str, body: UserPatch, user: dict = Depends(verify_token
                     )
 
             conn.execute(
-                text(f"DELETE FROM [{schema}].[UserRoles] WHERE UserId = :uid"),
+                text(f'DELETE FROM {qi(schema, "UserRoles", db_type)} WHERE "UserId" = :uid'),
                 {"uid": uid},
             )
             conn.execute(
                 text(f"""
-                    INSERT INTO [{schema}].[UserRoles]
-                        (UserId, RoleId, AssignedDate,
-                         CreatedById, CreatedDate, ModifiedById, ModifiedDate)
+                    INSERT INTO {qi(schema, "UserRoles", db_type)}
+                        ("UserId", "RoleId", "AssignedDate",
+                         "CreatedById", "CreatedDate", "ModifiedById", "ModifiedDate")
                     VALUES
                         (:uid, :rid, :now,
                          :cid, :now, :cid, :now)
@@ -389,13 +395,14 @@ def deactivate_user(user_id: str, user: dict = Depends(verify_token)):
 
     backend = get_backend()
     schema = backend.schema
+    db_type = backend.db_type
     engine = backend.get_engine()
     now = datetime.now(timezone.utc)
 
     with engine.begin() as conn:
         existing = conn.execute(
             text(f"""
-                SELECT u.IsActive FROM [{schema}].[Users] WHERE UserId = :uid
+                SELECT u."IsActive" FROM {qi(schema, "Users", db_type)} WHERE "UserId" = :uid
             """),
             {"uid": uid},
         ).fetchone()
@@ -407,15 +414,15 @@ def deactivate_user(user_id: str, user: dict = Depends(verify_token)):
         # Cannot deactivate the last active SystemAdmin
         current_roles = conn.execute(
             text(f"""
-                SELECT r.RoleName FROM [{schema}].[UserRoles] ur
-                JOIN [{schema}].[Roles] r ON r.RoleId = ur.RoleId
-                WHERE ur.UserId = :uid
+                SELECT r."RoleName" FROM {qi(schema, "UserRoles", db_type)} ur
+                JOIN {qi(schema, "Roles", db_type)} r ON r."RoleId" = ur."RoleId"
+                WHERE ur."UserId" = :uid
             """),
             {"uid": uid},
         ).fetchall()
         is_system_admin = any(r[0] == "SystemAdmin" for r in current_roles)
         if is_system_admin:
-            sa_count = _count_active_system_admins(conn, schema)
+            sa_count = _count_active_system_admins(conn, schema, db_type)
             if sa_count <= 1:
                 raise HTTPException(
                     status_code=403,
@@ -424,9 +431,9 @@ def deactivate_user(user_id: str, user: dict = Depends(verify_token)):
 
         conn.execute(
             text(f"""
-                UPDATE [{schema}].[Users]
-                SET IsActive = 0, ModifiedById = :mid, ModifiedDate = :now
-                WHERE UserId = :uid
+                UPDATE {qi(schema, "Users", db_type)}
+                SET "IsActive" = :active, "ModifiedById" = :mid, "ModifiedDate" = :now
+                WHERE "UserId" = :uid
             """),
-            {"mid": user["user_id"], "now": now, "uid": uid},
+            {"active": False, "mid": user["user_id"], "now": now, "uid": uid},
         )

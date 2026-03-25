@@ -14,6 +14,7 @@ class CoreBackend(Protocol):
     """Structural interface that every core-database backend must satisfy."""
 
     schema: str
+    db_type: str  # "mssql" | "postgres"
 
     def get_engine(self) -> Engine:
         """Return the SQLAlchemy engine for the core schema database."""

@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 class MSSQLBackend:
     """SQL Server backend for the admin-it core schema."""
 
+    db_type: str = "mssql"
+
     def __init__(self, engine: Engine, schema: str) -> None:
         self._engine = engine
         self.schema: str = schema

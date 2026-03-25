@@ -13,6 +13,7 @@ from app import settings
 from app.utils.auth_dependency import verify_token
 from app.utils.db_helpers import get_backend
 from app.utils.password import hash_password, needs_rehash, verify_password
+from app.utils.sql_helpers import quote_ident as qi
 
 router = APIRouter()
 security = HTTPBearer()
@@ -38,16 +39,17 @@ class UserInfo(BaseModel):
 def login(request: LoginRequest):
     backend = get_backend()
     schema = backend.schema
+    db_type = backend.db_type
     engine = backend.get_engine()
 
     # 1. Fetch credentials — separate connection from the rehash write below.
     with engine.connect() as conn:
         user_result = conn.execute(
             text(f"""
-            SELECT u.UserId, u.Username, u.PasswordHash, us.Salt
-            FROM [{schema}].[Users] u
-            JOIN [{schema}].[UserSecrets] us ON u.UserId = us.UserId
-            WHERE u.Username = :username
+            SELECT u."UserId", u."Username", u."PasswordHash", us."Salt"
+            FROM {qi(schema, "Users", db_type)} u
+            JOIN {qi(schema, "UserSecrets", db_type)} us ON u."UserId" = us."UserId"
+            WHERE u."Username" = :username
         """),
             {"username": request.username},
         ).fetchone()
@@ -73,18 +75,18 @@ def login(request: LoginRequest):
             with engine.begin() as conn:
                 conn.execute(
                     text(f"""
-                    UPDATE [{schema}].[Users]
-                    SET PasswordHash = :new_hash
-                    WHERE UserId = :uid
+                    UPDATE {qi(schema, "Users", db_type)}
+                    SET "PasswordHash" = :new_hash
+                    WHERE "UserId" = :uid
                 """),
                     {"new_hash": new_hash, "uid": user_id},
                 )
                 # Salt is no longer used for argon2id — clear it to signal migration complete.
                 conn.execute(
                     text(f"""
-                    UPDATE [{schema}].[UserSecrets]
-                    SET Salt = ''
-                    WHERE UserId = :uid
+                    UPDATE {qi(schema, "UserSecrets", db_type)}
+                    SET "Salt" = ''
+                    WHERE "UserId" = :uid
                 """),
                     {"uid": user_id},
                 )
@@ -97,10 +99,10 @@ def login(request: LoginRequest):
     with engine.connect() as conn:
         roles_result = conn.execute(
             text(f"""
-            SELECT r.RoleName
-            FROM [{schema}].[UserRoles] ur
-            JOIN [{schema}].[Roles] r ON ur.RoleId = r.RoleId
-            WHERE ur.UserId = :user_id
+            SELECT r."RoleName"
+            FROM {qi(schema, "UserRoles", db_type)} ur
+            JOIN {qi(schema, "Roles", db_type)} r ON ur."RoleId" = r."RoleId"
+            WHERE ur."UserId" = :user_id
         """),
             {"user_id": user_id},
         ).fetchall()
@@ -128,6 +130,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
     token = credentials.credentials
     backend = get_backend()
     schema = backend.schema
+    db_type = backend.db_type
     engine = backend.get_engine()
     jwt_secret = backend.fetch_secret("JWT_SECRET")
 
@@ -140,7 +143,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
     with engine.connect() as conn:
         user_result = conn.execute(
             text(f"""
-            SELECT Username FROM [{schema}].[Users] WHERE UserId = :uid
+            SELECT "Username" FROM {qi(schema, "Users", db_type)} WHERE "UserId" = :uid
         """),
             {"uid": user_id},
         ).fetchone()
@@ -150,17 +153,17 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
 
         roles_result = conn.execute(
             text(f"""
-            SELECT r.RoleName
-            FROM [{schema}].[UserRoles] ur
-            JOIN [{schema}].[Roles] r ON ur.RoleId = r.RoleId
-            WHERE ur.UserId = :uid
+            SELECT r."RoleName"
+            FROM {qi(schema, "UserRoles", db_type)} ur
+            JOIN {qi(schema, "Roles", db_type)} r ON ur."RoleId" = r."RoleId"
+            WHERE ur."UserId" = :uid
         """),
             {"uid": user_id},
         ).fetchall()
 
         roles = [r[0] for r in roles_result]
 
-        return UserInfo(user_id=user_id, username=user_result.Username, roles=roles)
+        return UserInfo(user_id=str(user_id), username=user_result[0], roles=roles)
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +184,7 @@ def change_password(body: ChangePasswordRequest, user: dict = Depends(verify_tok
     # all protected routes (users_routes, connections_routes, etc.).
     backend = get_backend()
     schema = backend.schema
+    db_type = backend.db_type
     engine = backend.get_engine()
     uid = user["user_id"]
 
@@ -188,10 +192,10 @@ def change_password(body: ChangePasswordRequest, user: dict = Depends(verify_tok
     with engine.connect() as conn:
         row = conn.execute(
             text(f"""
-                SELECT u.PasswordHash, us.Salt
-                FROM [{schema}].[Users] u
-                JOIN [{schema}].[UserSecrets] us ON us.UserId = u.UserId
-                WHERE u.UserId = :uid
+                SELECT u."PasswordHash", us."Salt"
+                FROM {qi(schema, "Users", db_type)} u
+                JOIN {qi(schema, "UserSecrets", db_type)} us ON us."UserId" = u."UserId"
+                WHERE u."UserId" = :uid
             """),
             {"uid": uid},
         ).fetchone()
@@ -212,15 +216,15 @@ def change_password(body: ChangePasswordRequest, user: dict = Depends(verify_tok
     with engine.begin() as conn:
         conn.execute(
             text(f"""
-                UPDATE [{schema}].[Users]
-                SET PasswordHash = :new_hash, ModifiedDate = :now
-                WHERE UserId = :uid
+                UPDATE {qi(schema, "Users", db_type)}
+                SET "PasswordHash" = :new_hash, "ModifiedDate" = :now
+                WHERE "UserId" = :uid
             """),
             {"new_hash": new_hash, "now": datetime.now(timezone.utc), "uid": uid},
         )
 
         # Ensure Salt is cleared (argon2id embeds salt in the hash string).
         conn.execute(
-            text(f"UPDATE [{schema}].[UserSecrets] SET Salt = '' WHERE UserId = :uid"),
+            text(f'UPDATE {qi(schema, "UserSecrets", db_type)} SET "Salt" = \'\' WHERE "UserId" = :uid'),
             {"uid": uid},
         )

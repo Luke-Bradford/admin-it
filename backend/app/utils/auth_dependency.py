@@ -7,6 +7,7 @@ from sqlalchemy import text
 
 from app import settings
 from app.utils.db_helpers import get_backend
+from app.utils.sql_helpers import quote_ident as qi
 
 security = HTTPBearer()
 
@@ -37,17 +38,18 @@ def verify_token_string(token: str) -> dict:
         raise HTTPException(status_code=503, detail="Service unavailable: setup not complete")
 
     schema = backend.schema
+    db_type = backend.db_type
     engine = backend.get_engine()
 
     # Fetch user info + roles from DB
     with engine.connect() as conn:
         result = conn.execute(
             text(f"""
-            SELECT u.Username, u.IsActive, r.RoleName
-            FROM [{schema}].[Users] u
-            LEFT JOIN [{schema}].[UserRoles] ur ON u.UserId = ur.UserId
-            LEFT JOIN [{schema}].[Roles] r ON ur.RoleId = r.RoleId
-            WHERE u.UserId = :uid
+            SELECT u."Username", u."IsActive", r."RoleName"
+            FROM {qi(schema, "Users", db_type)} u
+            LEFT JOIN {qi(schema, "UserRoles", db_type)} ur ON u."UserId" = ur."UserId"
+            LEFT JOIN {qi(schema, "Roles", db_type)} r ON ur."RoleId" = r."RoleId"
+            WHERE u."UserId" = :uid
         """),
             {"uid": user_id},
         ).fetchall()
