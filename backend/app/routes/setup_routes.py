@@ -23,6 +23,7 @@ from app.utils.secure_config import (
     load_core_config,
     save_core_config,
 )
+from app.utils.sql_helpers import quote_ident as qi
 
 _optional_bearer = HTTPBearer(auto_error=False)
 
@@ -174,6 +175,7 @@ def create_admin_user(user: AdminUserInput):
 
         backend = get_backend()
         schema = backend.schema
+        db_type = backend.db_type
         engine = backend.get_engine()
         now = datetime.now(timezone.utc)
 
@@ -181,18 +183,21 @@ def create_admin_user(user: AdminUserInput):
             existing = conn.execute(
                 text(f"""
                 SELECT COUNT(*)
-                FROM [{schema}].[Users] u
-                JOIN [{schema}].[UserRoles] ur ON u.UserId = ur.UserId
-                JOIN [{schema}].[Roles] r ON ur.RoleId = r.RoleId
-                WHERE r.RoleName = 'SystemAdmin'
+                FROM {qi(schema, "Users", db_type)} u
+                JOIN {qi(schema, "UserRoles", db_type)} ur ON u."UserId" = ur."UserId"
+                JOIN {qi(schema, "Roles", db_type)} r ON ur."RoleId" = r."RoleId"
+                WHERE r."RoleName" = 'SystemAdmin'
             """)
             ).scalar()
             if existing > 0:
                 raise HTTPException(status_code=400, detail="SystemAdmin user already exists.")
 
+            # FETCH FIRST 1 ROW ONLY is ANSI SQL: works on SQL Server 2012+ and PostgreSQL.
             role_id = conn.execute(
                 text(f"""
-                SELECT TOP 1 RoleId FROM [{schema}].[Roles] WHERE RoleName = 'SystemAdmin'
+                SELECT "RoleId" FROM {qi(schema, "Roles", db_type)}
+                WHERE "RoleName" = 'SystemAdmin'
+                FETCH FIRST 1 ROW ONLY
             """)
             ).scalar()
             if not role_id:
@@ -205,9 +210,9 @@ def create_admin_user(user: AdminUserInput):
 
             conn.execute(
                 text(f"""
-                INSERT INTO [{schema}].[Users] (
-                    UserId, Username, Email, PasswordHash,
-                    CreatedById, CreatedDate, ModifiedById, ModifiedDate
+                INSERT INTO {qi(schema, "Users", db_type)} (
+                    "UserId", "Username", "Email", "PasswordHash",
+                    "CreatedById", "CreatedDate", "ModifiedById", "ModifiedDate"
                 ) VALUES (
                     :uid, :username, :email, :phash,
                     NULL, :now, NULL, :now
@@ -218,9 +223,9 @@ def create_admin_user(user: AdminUserInput):
 
             conn.execute(
                 text(f"""
-                INSERT INTO [{schema}].[UserSecrets] (
-                    UserSecretId, UserId, Salt,
-                    CreatedById, CreatedDate, ModifiedById, ModifiedDate
+                INSERT INTO {qi(schema, "UserSecrets", db_type)} (
+                    "UserSecretId", "UserId", "Salt",
+                    "CreatedById", "CreatedDate", "ModifiedById", "ModifiedDate"
                 ) VALUES (
                     :sid, :uid, :salt,
                     NULL, :now, NULL, :now
@@ -231,9 +236,9 @@ def create_admin_user(user: AdminUserInput):
 
             conn.execute(
                 text(f"""
-                INSERT INTO [{schema}].[UserRoles] (
-                    UserId, RoleId, AssignedDate,
-                    CreatedById, CreatedDate, ModifiedById, ModifiedDate
+                INSERT INTO {qi(schema, "UserRoles", db_type)} (
+                    "UserId", "RoleId", "AssignedDate",
+                    "CreatedById", "CreatedDate", "ModifiedById", "ModifiedDate"
                 ) VALUES (
                     :uid, :rid, :now,
                     NULL, :now, NULL, :now
@@ -258,13 +263,14 @@ def check_admin_user_present():
 
         backend = get_backend()
         schema = backend.schema
+        db_type = backend.db_type
         with backend.get_engine().connect() as conn:
             result = conn.execute(
                 text(f"""
-                SELECT COUNT(*) FROM [{schema}].[Users] u
-                JOIN [{schema}].[UserRoles] ur ON ur.UserId = u.UserId
-                JOIN [{schema}].[Roles] r ON r.RoleId = ur.RoleId
-                WHERE r.RoleName = 'SystemAdmin'
+                SELECT COUNT(*) FROM {qi(schema, "Users", db_type)} u
+                JOIN {qi(schema, "UserRoles", db_type)} ur ON ur."UserId" = u."UserId"
+                JOIN {qi(schema, "Roles", db_type)} r ON r."RoleId" = ur."RoleId"
+                WHERE r."RoleName" = 'SystemAdmin'
             """)
             )
             count = result.scalar()

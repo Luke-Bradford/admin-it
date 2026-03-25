@@ -4,10 +4,12 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+import jwt as pyjwt
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import settings
+from app.routes.audit_routes import router as audit_router
 from app.routes.auth_routes import router as auth_router
 from app.routes.connections_routes import router as connections_router
 from app.routes.discovery_routes import router as discovery_router
@@ -60,6 +62,49 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def set_db_user_context(request: Request, call_next):
+    """Populate the per-request ContextVar used by the PostgreSQL audit trigger.
+
+    Decodes the JWT (without verifying expiry — full validation happens inside
+    the route via auth_dependency) to extract the user's UUID, then stores it
+    in the postgres_backend._current_user_id ContextVar.  The PostgreSQL
+    backend's 'begin' event listener reads this value and sets the Postgres
+    session variable app.current_user_id so audit triggers can record who made
+    each change.
+
+    For the MSSQL backend this middleware is a no-op: the ContextVar import
+    succeeds but no engine listener is registered, so setting the value has
+    no effect.
+    """
+    try:
+        from app.backends.postgres_backend import _current_user_id  # noqa: PLC0415
+
+        uid: str | None = None
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer ") and settings.JWT_SECRET:
+            token = auth_header[len("Bearer ") :]
+            try:
+                payload = pyjwt.decode(
+                    token,
+                    settings.JWT_SECRET,
+                    algorithms=["HS256"],
+                    options={"verify_exp": False},
+                )
+                uid = payload.get("sub")
+            except Exception:
+                pass
+
+        token_ctx = _current_user_id.set(uid)
+        try:
+            return await call_next(request)
+        finally:
+            _current_user_id.reset(token_ctx)
+    except Exception:
+        # Never let middleware errors break the request pipeline.
+        return await call_next(request)
+
+
 @app.get("/ping")
 def ping():
     return {"message": "pong"}
@@ -73,3 +118,4 @@ app.include_router(auth_router, prefix="/api/auth", tags=["Auth"])
 app.include_router(manage_router, prefix="/api/manage", tags=["Manage"])
 app.include_router(connections_router, prefix="/api/connections", tags=["Connections"])
 app.include_router(users_router, prefix="/api/users", tags=["Users"])
+app.include_router(audit_router, prefix="/api/audit", tags=["Audit"])

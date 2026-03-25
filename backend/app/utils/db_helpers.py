@@ -15,15 +15,19 @@ _backend: CoreBackend | None = None
 def _create_backend(core: dict) -> CoreBackend:
     """Factory: build the appropriate backend from the decrypted core-config dict.
 
-    Currently only 'mssql' is supported.  The 'db_type' key defaults to 'mssql'
-    for backward compatibility with existing encrypted config files that pre-date
-    ticket #78 (which will write the key explicitly).
-    When ticket #76 lands, add the 'postgres' branch here.
+    The 'db_type' key defaults to 'mssql' for backward compatibility with
+    existing encrypted config files that pre-date ticket #78 (which writes
+    the key explicitly).
     """
     db_type = core.get("db_type", "mssql")
-    if db_type != "mssql":
-        raise RuntimeError(f"Unsupported db_type: {db_type!r}. Only 'mssql' is supported in this version.")
-    return create_mssql_backend(core)
+    if db_type == "mssql":
+        return create_mssql_backend(core)
+    if db_type == "postgres":
+        # Deferred import so that psycopg2 is only required when actually used.
+        from app.backends.postgres_backend import create_postgres_backend  # noqa: PLC0415
+
+        return create_postgres_backend(core)
+    raise RuntimeError(f"Unsupported db_type: {db_type!r}. Supported values: 'mssql', 'postgres'.")
 
 
 def init_engine() -> CoreBackend:

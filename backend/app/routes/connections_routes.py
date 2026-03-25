@@ -12,6 +12,7 @@ from sqlalchemy import text
 from app.utils.auth_dependency import verify_token
 from app.utils.connection_crypto import decrypt_credentials, encrypt_credentials
 from app.utils.db_helpers import get_backend
+from app.utils.sql_helpers import quote_ident as qi
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -115,6 +116,7 @@ def _parse_connection_id(raw: str) -> str:
 def list_connections(user: dict = Depends(verify_token)):
     backend = get_backend()
     schema = backend.schema
+    db_type = backend.db_type
     engine = backend.get_engine()
     is_admin = bool(ADMIN_ROLES.intersection(user.get("roles", [])))
 
@@ -122,23 +124,24 @@ def list_connections(user: dict = Depends(verify_token)):
         if is_admin:
             rows = conn.execute(
                 text(f"""
-                    SELECT ConnectionId, Name, CreatedDate, ModifiedDate
-                    FROM [{schema}].[Connections]
-                    WHERE IsActive = 1
-                    ORDER BY Name
-                """)
+                    SELECT "ConnectionId", "Name", "CreatedDate", "ModifiedDate"
+                    FROM {qi(schema, "Connections", db_type)}
+                    WHERE "IsActive" = :active
+                    ORDER BY "Name"
+                """),
+                {"active": True},
             ).fetchall()
         else:
             rows = conn.execute(
                 text(f"""
-                    SELECT c.ConnectionId, c.Name, c.CreatedDate, c.ModifiedDate
-                    FROM [{schema}].[Connections] c
-                    JOIN [{schema}].[UserConnectionAccess] uca
-                        ON uca.ConnectionId = c.ConnectionId
-                    WHERE uca.UserId = :uid AND c.IsActive = 1
-                    ORDER BY c.Name
+                    SELECT c."ConnectionId", c."Name", c."CreatedDate", c."ModifiedDate"
+                    FROM {qi(schema, "Connections", db_type)} c
+                    JOIN {qi(schema, "UserConnectionAccess", db_type)} uca
+                        ON uca."ConnectionId" = c."ConnectionId"
+                    WHERE uca."UserId" = :uid AND c."IsActive" = :active
+                    ORDER BY c."Name"
                 """),
-                {"uid": user["user_id"]},
+                {"uid": user["user_id"], "active": True},
             ).fetchall()
 
     return [
@@ -164,13 +167,14 @@ def create_connection(body: ConnectionIn, user: dict = Depends(verify_token)):
 
     backend = get_backend()
     schema = backend.schema
+    db_type = backend.db_type
     engine = backend.get_engine()
 
     # 1. Duplicate-name check (cheap) before live test (expensive).
     with engine.connect() as conn:
         existing = conn.execute(
-            text(f"SELECT 1 FROM [{schema}].[Connections] WHERE Name = :name AND IsActive = 1"),
-            {"name": body.name},
+            text(f'SELECT 1 FROM {qi(schema, "Connections", db_type)} WHERE "Name" = :name AND "IsActive" = :active'),
+            {"name": body.name, "active": True},
         ).fetchone()
     if existing:
         raise HTTPException(status_code=409, detail="A connection with that name already exists")
@@ -194,17 +198,18 @@ def create_connection(body: ConnectionIn, user: dict = Depends(verify_token)):
     with engine.begin() as conn:
         conn.execute(
             text(f"""
-                INSERT INTO [{schema}].[Connections]
-                    (ConnectionId, Name, ConnectionString, IsActive,
-                     CreatedById, CreatedDate, ModifiedById, ModifiedDate)
+                INSERT INTO {qi(schema, "Connections", db_type)}
+                    ("ConnectionId", "Name", "ConnectionString", "IsActive",
+                     "CreatedById", "CreatedDate", "ModifiedById", "ModifiedDate")
                 VALUES
-                    (:cid, :name, :cs, 1,
+                    (:cid, :name, :cs, :active,
                      :uid, :now, :uid, :now)
             """),
             {
                 "cid": connection_id,
                 "name": body.name,
                 "cs": encrypted,
+                "active": True,
                 "uid": user["user_id"],
                 "now": now,
             },
@@ -232,6 +237,7 @@ def update_connection(
 
     backend = get_backend()
     schema = backend.schema
+    db_type = backend.db_type
     engine = backend.get_engine()
     now = datetime.now(timezone.utc)
 
@@ -239,11 +245,11 @@ def update_connection(
     with engine.connect() as conn:
         row = conn.execute(
             text(f"""
-                SELECT ConnectionId, Name, ConnectionString
-                FROM [{schema}].[Connections]
-                WHERE ConnectionId = :cid AND IsActive = 1
+                SELECT "ConnectionId", "Name", "ConnectionString"
+                FROM {qi(schema, "Connections", db_type)}
+                WHERE "ConnectionId" = :cid AND "IsActive" = :active
             """),
-            {"cid": cid},
+            {"cid": cid, "active": True},
         ).fetchone()
 
     if not row:
@@ -266,10 +272,10 @@ def update_connection(
         with engine.connect() as conn:
             conflict = conn.execute(
                 text(f"""
-                    SELECT 1 FROM [{schema}].[Connections]
-                    WHERE Name = :name AND ConnectionId != :cid AND IsActive = 1
+                    SELECT 1 FROM {qi(schema, "Connections", db_type)}
+                    WHERE "Name" = :name AND "ConnectionId" != :cid AND "IsActive" = :active
                 """),
-                {"name": new_name, "cid": cid},
+                {"name": new_name, "cid": cid, "active": True},
             ).fetchone()
         if conflict:
             raise HTTPException(status_code=409, detail="A connection with that name already exists")
@@ -285,12 +291,12 @@ def update_connection(
     with engine.begin() as conn:
         result = conn.execute(
             text(f"""
-                UPDATE [{schema}].[Connections]
-                SET Name = :name,
-                    ConnectionString = :cs,
-                    ModifiedById = :uid,
-                    ModifiedDate = :now
-                WHERE ConnectionId = :cid AND IsActive = 1
+                UPDATE {qi(schema, "Connections", db_type)}
+                SET "Name" = :name,
+                    "ConnectionString" = :cs,
+                    "ModifiedById" = :uid,
+                    "ModifiedDate" = :now
+                WHERE "ConnectionId" = :cid AND "IsActive" = :active
             """),
             {
                 "name": new_name,
@@ -298,6 +304,7 @@ def update_connection(
                 "uid": user["user_id"],
                 "now": now,
                 "cid": cid,
+                "active": True,
             },
         )
         if result.rowcount == 0:
@@ -318,13 +325,17 @@ def delete_connection(connection_id: str, user: dict = Depends(verify_token)):
 
     backend = get_backend()
     schema = backend.schema
+    db_type = backend.db_type
     engine = backend.get_engine()
     now = datetime.now(timezone.utc)
 
     with engine.begin() as conn:
         row = conn.execute(
-            text(f"SELECT 1 FROM [{schema}].[Connections] WHERE ConnectionId = :cid AND IsActive = 1"),
-            {"cid": cid},
+            text(f"""
+                SELECT 1 FROM {qi(schema, "Connections", db_type)}
+                WHERE "ConnectionId" = :cid AND "IsActive" = :active
+            """),
+            {"cid": cid, "active": True},
         ).fetchone()
 
         if not row:
@@ -332,11 +343,11 @@ def delete_connection(connection_id: str, user: dict = Depends(verify_token)):
 
         conn.execute(
             text(f"""
-                UPDATE [{schema}].[Connections]
-                SET IsActive = 0,
-                    ModifiedById = :uid,
-                    ModifiedDate = :now
-                WHERE ConnectionId = :cid
+                UPDATE {qi(schema, "Connections", db_type)}
+                SET "IsActive" = :active,
+                    "ModifiedById" = :uid,
+                    "ModifiedDate" = :now
+                WHERE "ConnectionId" = :cid
             """),
-            {"uid": user["user_id"], "now": now, "cid": cid},
+            {"active": False, "uid": user["user_id"], "now": now, "cid": cid},
         )

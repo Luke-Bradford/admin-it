@@ -23,6 +23,7 @@ class MSSQLBackend:
     def __init__(self, engine: Engine, schema: str) -> None:
         self._engine = engine
         self.schema: str = schema
+        self.db_type: str = "mssql"
 
     def get_engine(self) -> Engine:
         return self._engine
