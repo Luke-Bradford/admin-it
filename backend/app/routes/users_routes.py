@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from app.utils.auth_dependency import verify_token
-from app.utils.db_helpers import get_config_and_engine
+from app.utils.db_helpers import get_backend
 from app.utils.password import hash_password
 
 router = APIRouter()
@@ -109,8 +109,9 @@ def _count_active_system_admins(conn, schema: str) -> int:
 @router.get("")
 def list_users(user: dict = Depends(verify_token)):
     _require_admin(user)
-    config, engine = get_config_and_engine()
-    schema = config.schema
+    backend = get_backend()
+    schema = backend.schema
+    engine = backend.get_engine()
 
     with engine.connect() as conn:
         rows = conn.execute(
@@ -167,8 +168,9 @@ def create_user(body: UserCreate, user: dict = Depends(verify_token)):
             detail=f"You cannot assign the '{body.role}' role — it exceeds your own privilege level",
         )
 
-    config, engine = get_config_and_engine()
-    schema = config.schema
+    backend = get_backend()
+    schema = backend.schema
+    engine = backend.get_engine()
     now = datetime.now(timezone.utc)
 
     with engine.begin() as conn:
@@ -252,8 +254,9 @@ def update_user(user_id: str, body: UserPatch, user: dict = Depends(verify_token
                 detail=f"You cannot assign the '{body.role}' role — it exceeds your own privilege level",
             )
 
-    config, engine = get_config_and_engine()
-    schema = config.schema
+    backend = get_backend()
+    schema = backend.schema
+    engine = backend.get_engine()
     now = datetime.now(timezone.utc)
 
     if body.username is None and body.email is None and body.role is None and body.is_active is None:
@@ -384,8 +387,9 @@ def deactivate_user(user_id: str, user: dict = Depends(verify_token)):
     if uid == user["user_id"]:
         raise HTTPException(status_code=403, detail="You cannot deactivate your own account")
 
-    config, engine = get_config_and_engine()
-    schema = config.schema
+    backend = get_backend()
+    schema = backend.schema
+    engine = backend.get_engine()
     now = datetime.now(timezone.utc)
 
     with engine.begin() as conn:

@@ -15,7 +15,6 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
-from app.database.database_setup import deploy_core_schema, is_core_schema_deployed
 from app.utils.auth_dependency import verify_token, verify_token_string
 from app.utils.host_resolver import resolve_hostname
 from app.utils.secure_config import (
@@ -103,12 +102,12 @@ async def setup(
     raw = details.model_dump(by_alias=True)
     save_core_config(raw)
 
-    # Reinitialise the engine singleton so protected routes pick up the new config
+    # Reinitialise the backend singleton so protected routes pick up the new config
     # without requiring a server restart. Deferred import avoids a circular import:
     # setup_routes is imported by main.py before db_helpers is fully initialised.
     from app.utils.db_helpers import init_engine  # noqa: PLC0415
 
-    init_engine()
+    init_engine()  # returns CoreBackend; singleton stored internally in db_helpers
 
     masked = raw.copy()
     masked["db_password"] = "*" * len(raw["db_password"])
@@ -141,10 +140,10 @@ async def delete_setup(_user: dict = Depends(verify_token)):
 def check_deploy_status():
     try:
         # Deferred import: db_helpers singleton may not be initialised yet on fresh install.
-        from app.utils.db_helpers import get_config_and_engine  # noqa: PLC0415
+        from app.utils.db_helpers import get_backend  # noqa: PLC0415
 
-        config, engine = get_config_and_engine()
-        deployed = is_core_schema_deployed(engine, schema=config.schema)
+        backend = get_backend()
+        deployed = backend.is_schema_deployed()
         return {"deployed": deployed}
     except Exception as e:
         logging.error("Error checking deployment status: %s", str(e))
@@ -154,14 +153,14 @@ def check_deploy_status():
 @router.post("/deploy-schema")
 def trigger_deploy_schema():
     try:
-        from app.utils.db_helpers import get_config_and_engine  # noqa: PLC0415
+        from app.utils.db_helpers import get_backend  # noqa: PLC0415
 
-        config, engine = get_config_and_engine()
+        backend = get_backend()
 
-        if is_core_schema_deployed(engine, schema=config.schema):
+        if backend.is_schema_deployed():
             return JSONResponse(status_code=200, content={"message": "Schema already deployed."})
 
-        deploy_core_schema(engine, schema=config.schema)
+        backend.deploy_schema()
         return {"message": "Schema deployed successfully."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -170,19 +169,21 @@ def trigger_deploy_schema():
 @router.post("/create-admin")
 def create_admin_user(user: AdminUserInput):
     try:
-        from app.utils.db_helpers import get_config_and_engine  # noqa: PLC0415
+        from app.utils.db_helpers import get_backend  # noqa: PLC0415
         from app.utils.password import hash_password  # noqa: PLC0415
 
-        config, engine = get_config_and_engine()
+        backend = get_backend()
+        schema = backend.schema
+        engine = backend.get_engine()
         now = datetime.now(timezone.utc)
 
         with engine.begin() as conn:
             existing = conn.execute(
                 text(f"""
                 SELECT COUNT(*)
-                FROM [{config.schema}].[Users] u
-                JOIN [{config.schema}].[UserRoles] ur ON u.UserId = ur.UserId
-                JOIN [{config.schema}].[Roles] r ON ur.RoleId = r.RoleId
+                FROM [{schema}].[Users] u
+                JOIN [{schema}].[UserRoles] ur ON u.UserId = ur.UserId
+                JOIN [{schema}].[Roles] r ON ur.RoleId = r.RoleId
                 WHERE r.RoleName = 'SystemAdmin'
             """)
             ).scalar()
@@ -191,7 +192,7 @@ def create_admin_user(user: AdminUserInput):
 
             role_id = conn.execute(
                 text(f"""
-                SELECT TOP 1 RoleId FROM [{config.schema}].[Roles] WHERE RoleName = 'SystemAdmin'
+                SELECT TOP 1 RoleId FROM [{schema}].[Roles] WHERE RoleName = 'SystemAdmin'
             """)
             ).scalar()
             if not role_id:
@@ -204,7 +205,7 @@ def create_admin_user(user: AdminUserInput):
 
             conn.execute(
                 text(f"""
-                INSERT INTO [{config.schema}].[Users] (
+                INSERT INTO [{schema}].[Users] (
                     UserId, Username, Email, PasswordHash,
                     CreatedById, CreatedDate, ModifiedById, ModifiedDate
                 ) VALUES (
@@ -217,7 +218,7 @@ def create_admin_user(user: AdminUserInput):
 
             conn.execute(
                 text(f"""
-                INSERT INTO [{config.schema}].[UserSecrets] (
+                INSERT INTO [{schema}].[UserSecrets] (
                     UserSecretId, UserId, Salt,
                     CreatedById, CreatedDate, ModifiedById, ModifiedDate
                 ) VALUES (
@@ -230,7 +231,7 @@ def create_admin_user(user: AdminUserInput):
 
             conn.execute(
                 text(f"""
-                INSERT INTO [{config.schema}].[UserRoles] (
+                INSERT INTO [{schema}].[UserRoles] (
                     UserId, RoleId, AssignedDate,
                     CreatedById, CreatedDate, ModifiedById, ModifiedDate
                 ) VALUES (
@@ -253,11 +254,11 @@ def create_admin_user(user: AdminUserInput):
 @router.get("/admin-status")
 def check_admin_user_present():
     try:
-        from app.utils.db_helpers import get_config_and_engine  # noqa: PLC0415
+        from app.utils.db_helpers import get_backend  # noqa: PLC0415
 
-        config, engine = get_config_and_engine()
-        schema = config.schema
-        with engine.connect() as conn:
+        backend = get_backend()
+        schema = backend.schema
+        with backend.get_engine().connect() as conn:
             result = conn.execute(
                 text(f"""
                 SELECT COUNT(*) FROM [{schema}].[Users] u

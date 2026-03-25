@@ -6,7 +6,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import text
 
 from app import settings
-from app.utils.db_helpers import get_config_and_engine
+from app.utils.db_helpers import get_backend
 
 security = HTTPBearer()
 
@@ -32,11 +32,12 @@ def verify_token_string(token: str) -> dict:
         raise HTTPException(status_code=401, detail="Invalid token")
 
     try:
-        config, engine = get_config_and_engine()
+        backend = get_backend()
     except RuntimeError:
         raise HTTPException(status_code=503, detail="Service unavailable: setup not complete")
 
-    schema = config.schema
+    schema = backend.schema
+    engine = backend.get_engine()
 
     # Fetch user info + roles from DB
     with engine.connect() as conn:

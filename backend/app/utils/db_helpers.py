@@ -1,47 +1,50 @@
 # app/utils/db_helpers.py
 
-from app.db import DatabaseConfig, get_engine
-from app.utils.host_resolver import resolve_hostname
+import logging
+
+from app.backends.core_backend import CoreBackend
+from app.backends.mssql_backend import create_mssql_backend
 from app.utils.secure_config import load_core_config
 
-# Module-level singletons — initialised once at startup, replaced on config change.
-_engine = None
-_config = None
+logger = logging.getLogger(__name__)
+
+# Module-level singleton — initialised once at startup, replaced on config change.
+_backend: CoreBackend | None = None
 
 
-def init_engine():
+def _create_backend(core: dict) -> CoreBackend:
+    """Factory: build the appropriate backend from the decrypted core-config dict.
+
+    Currently only 'mssql' is supported.  The 'db_type' key defaults to 'mssql'
+    for backward compatibility with existing encrypted config files that pre-date
+    ticket #78 (which will write the key explicitly).
+    When ticket #76 lands, add the 'postgres' branch here.
     """
-    Load config from disk and create the SQLAlchemy engine singleton.
+    db_type = core.get("db_type", "mssql")
+    if db_type != "mssql":
+        raise RuntimeError(f"Unsupported db_type: {db_type!r}. Only 'mssql' is supported in this version.")
+    return create_mssql_backend(core)
+
+
+def init_engine() -> CoreBackend:
+    """Load config from disk and create the backend singleton.
+
     Called at startup (via lifespan) and after setup config is written.
     Raises if no config file exists — callers must guard with core_config_exists().
     """
-    global _engine, _config
+    global _backend
 
     core = load_core_config()
-    resolved_host = resolve_hostname(core["db_host"], use_localhost_alias=core.get("use_localhost_alias", False))
-
-    config = DatabaseConfig(
-        server=resolved_host,
-        port=core["db_port"],
-        user=core["db_user"],
-        password=core["db_password"],
-        database=core["db_name"],
-        odbc_driver=core["odbc_driver"],
-        schema=core["schema"],
-    )
-    engine = get_engine(config)
-
-    _config = config
-    _engine = engine
-    return config, engine
+    _backend = _create_backend(core)
+    return _backend
 
 
-def get_config_and_engine():
+def get_backend() -> CoreBackend:
+    """Return the cached backend instance.
+
+    Raises RuntimeError if not yet initialised — this surfaces as a 503 via
+    auth_dependency before any protected route runs.
     """
-    Return the cached (config, engine) pair.
-    Raises RuntimeError if the engine has not been initialised yet —
-    this surfaces as a 503 via auth_dependency before any protected route runs.
-    """
-    if _engine is None or _config is None:
-        raise RuntimeError("Database engine not initialised. Setup may not be complete.")
-    return _config, _engine
+    if _backend is None:
+        raise RuntimeError("Database backend not initialised. Setup may not be complete.")
+    return _backend

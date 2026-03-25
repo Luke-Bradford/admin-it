@@ -11,7 +11,7 @@ from sqlalchemy import text
 
 from app.utils.auth_dependency import verify_token
 from app.utils.connection_crypto import decrypt_credentials, encrypt_credentials
-from app.utils.db_helpers import get_config_and_engine
+from app.utils.db_helpers import get_backend
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -113,8 +113,9 @@ def _parse_connection_id(raw: str) -> str:
 
 @router.get("")
 def list_connections(user: dict = Depends(verify_token)):
-    config, engine = get_config_and_engine()
-    schema = config.schema
+    backend = get_backend()
+    schema = backend.schema
+    engine = backend.get_engine()
     is_admin = bool(ADMIN_ROLES.intersection(user.get("roles", [])))
 
     with engine.connect() as conn:
@@ -161,8 +162,9 @@ def create_connection(body: ConnectionIn, user: dict = Depends(verify_token)):
     _require_admin(user)
     _validate_driver(body.odbc_driver)
 
-    config, engine = get_config_and_engine()
-    schema = config.schema
+    backend = get_backend()
+    schema = backend.schema
+    engine = backend.get_engine()
 
     # 1. Duplicate-name check (cheap) before live test (expensive).
     with engine.connect() as conn:
@@ -185,7 +187,7 @@ def create_connection(body: ConnectionIn, user: dict = Depends(verify_token)):
     _test_pyodbc(creds)
 
     # 3. Encrypt and persist.
-    encrypted = encrypt_credentials(engine, schema, creds)
+    encrypted = encrypt_credentials(backend, creds)
     connection_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
 
@@ -228,8 +230,9 @@ def update_connection(
     if body.odbc_driver is not None:
         _validate_driver(body.odbc_driver)
 
-    config, engine = get_config_and_engine()
-    schema = config.schema
+    backend = get_backend()
+    schema = backend.schema
+    engine = backend.get_engine()
     now = datetime.now(timezone.utc)
 
     # 1. Fetch current row (read-only — no transaction yet).
@@ -246,7 +249,7 @@ def update_connection(
     if not row:
         raise HTTPException(status_code=404, detail="Connection not found")
 
-    current_creds = decrypt_credentials(engine, schema, row[2])
+    current_creds = decrypt_credentials(backend, row[2])
 
     updated_creds = {
         "host": body.host if body.host is not None else current_creds["host"],
@@ -277,7 +280,7 @@ def update_connection(
         _test_pyodbc(updated_creds)
 
     # 4. Encrypt and write.
-    new_encrypted = encrypt_credentials(engine, schema, updated_creds)
+    new_encrypted = encrypt_credentials(backend, updated_creds)
 
     with engine.begin() as conn:
         result = conn.execute(
@@ -313,8 +316,9 @@ def delete_connection(connection_id: str, user: dict = Depends(verify_token)):
     _require_system_admin(user)
     cid = _parse_connection_id(connection_id)
 
-    config, engine = get_config_and_engine()
-    schema = config.schema
+    backend = get_backend()
+    schema = backend.schema
+    engine = backend.get_engine()
     now = datetime.now(timezone.utc)
 
     with engine.begin() as conn:
