@@ -509,8 +509,7 @@ This gives the same query interface as the SQL Server audit log — the audit UI
 
 Phase 1 hardening is complete. Phase 2 (connection and user management) is done. Phase 1.5 (frontend overhaul) is done. Remaining work in priority order:
 
-1. **#76 — PostgreSQL backend for the core schema** — implement PostgreSQLBackend behind the CoreBackend interface (#75 done)
-2. **#77 — SQL Server: add explicit audit_log table** — application-level audit context temporal tables don't capture
-3. **#78 — Setup wizard: database type picker** — wire new backends into the wizard UI
-4. **#79 — Detect existing install — connect-only mode**
-5. Then Phase 3 (data browser) — the core end-user value
+1. **#77 — SQL Server: add explicit audit_log table** — application-level audit context temporal tables don't capture (#75, #76 done)
+2. **#78 — Setup wizard: database type picker** — wire new backends into the wizard UI
+3. **#79 — Detect existing install — connect-only mode**
+4. Then Phase 3 (data browser) — the core end-user value
