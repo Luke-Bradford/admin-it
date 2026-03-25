@@ -130,7 +130,7 @@ class PostgreSQLBackend:
                 {"st": secret_type},
             ).fetchone()
         if result:
-            return result[0]
+            return result._mapping["SecretValue"]
         logger.error("[postgres_backend] Secret '%s' not found in schema '%s'", secret_type, schema)
         raise RuntimeError(f"Secret '{secret_type}' not found.")
 
