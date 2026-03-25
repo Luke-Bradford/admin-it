@@ -107,7 +107,7 @@ async def setup(
     # setup_routes is imported by main.py before db_helpers is fully initialised.
     from app.utils.db_helpers import init_engine  # noqa: PLC0415
 
-    init_engine()  # returns MSSQLBackend but return value not needed here
+    init_engine()  # returns CoreBackend; singleton stored internally in db_helpers
 
     masked = raw.copy()
     masked["db_password"] = "*" * len(raw["db_password"])
