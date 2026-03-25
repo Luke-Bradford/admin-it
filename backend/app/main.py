@@ -109,7 +109,7 @@ async def set_db_user_context(request: Request, call_next):
         finally:
             reset_current_user(ctx_token)
     except Exception:
-        # Never let middleware errors break the request pipeline.
+        logger.warning("[set_db_user_context] Unexpected error in audit-context middleware", exc_info=True)
         return await call_next(request)
 
 
