@@ -7,7 +7,6 @@ from sqlalchemy import MetaData, create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import declarative_base
-from sqlalchemy.sql import text
 
 
 class DatabaseConfig:
@@ -97,28 +96,3 @@ def get_base(schema: str):
     """
     metadata = MetaData(schema=schema)
     return declarative_base(metadata=metadata)
-
-
-def test_connection(engine: Engine) -> bool:
-    """
-    Attempt to connect and execute a trivial query.
-    """
-    try:
-        with engine.connect() as conn:
-            conn.execute("SELECT 1")
-        return True
-    except SQLAlchemyError:
-        return False
-
-
-def fetch_secret(engine, schema: str, secret_type: str) -> str:
-    """Fetch a secret value from the Secrets table using the given schema."""
-    with engine.connect() as conn:
-        query = text(f"""
-            SELECT SecretValue FROM [{schema}].[Secrets]
-            WHERE SecretType = :secret_type
-        """)
-        result = conn.execute(query, {"secret_type": secret_type}).fetchone()
-        if result:
-            return result[0]
-        raise RuntimeError(f"Secret '{secret_type}' not found in schema '{schema}'")

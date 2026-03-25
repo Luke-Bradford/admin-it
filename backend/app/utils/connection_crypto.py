@@ -12,31 +12,30 @@ import logging
 
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import HTTPException
-from sqlalchemy.engine import Engine
 
-from app.db import fetch_secret
+from app.backends.core_backend import CoreBackend
 
 logger = logging.getLogger(__name__)
 
 
-def _get_fernet(engine: Engine, schema: str) -> Fernet:
-    key = fetch_secret(engine, schema, "CONNECTION_KEY")
+def _get_fernet(backend: CoreBackend) -> Fernet:
+    key = backend.fetch_secret("CONNECTION_KEY")
     try:
         return Fernet(key.strip().encode())
     except Exception:
-        logger.error("[connection_crypto] CONNECTION_KEY in [adm].[Secrets] is not a valid Fernet key")
+        logger.error("[connection_crypto] CONNECTION_KEY in Secrets is not a valid Fernet key")
         raise HTTPException(status_code=500, detail="Server configuration error: invalid encryption key")
 
 
-def encrypt_credentials(engine: Engine, schema: str, credentials: dict) -> str:
+def encrypt_credentials(backend: CoreBackend, credentials: dict) -> str:
     """Encrypt a credentials dict and return the Fernet token as a UTF-8 string."""
-    f = _get_fernet(engine, schema)
+    f = _get_fernet(backend)
     return f.encrypt(json.dumps(credentials).encode("utf-8")).decode("utf-8")
 
 
-def decrypt_credentials(engine: Engine, schema: str, token: str) -> dict:
+def decrypt_credentials(backend: CoreBackend, token: str) -> dict:
     """Decrypt a stored Fernet token and return the credentials dict."""
-    f = _get_fernet(engine, schema)
+    f = _get_fernet(backend)
     try:
         return json.loads(f.decrypt(token.encode("utf-8")).decode("utf-8"))
     except InvalidToken:

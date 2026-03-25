@@ -10,9 +10,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from app import settings
-from app.db import fetch_secret
 from app.utils.auth_dependency import verify_token
-from app.utils.db_helpers import get_config_and_engine
+from app.utils.db_helpers import get_backend
 from app.utils.password import hash_password, needs_rehash, verify_password
 
 router = APIRouter()
@@ -37,8 +36,9 @@ class UserInfo(BaseModel):
 
 @router.post("/login", response_model=LoginResponse)
 def login(request: LoginRequest):
-    config, engine = get_config_and_engine()
-    schema = config.schema
+    backend = get_backend()
+    schema = backend.schema
+    engine = backend.get_engine()
 
     # 1. Fetch credentials — separate connection from the rehash write below.
     with engine.connect() as conn:
@@ -107,7 +107,7 @@ def login(request: LoginRequest):
 
     roles = [row[0] for row in roles_result] if roles_result else []
 
-    jwt_secret = fetch_secret(engine, schema, "JWT_SECRET")
+    jwt_secret = backend.fetch_secret("JWT_SECRET")
 
     expires_delta = timedelta(hours=settings.JWT_EXPIRES_HOURS)
     expire_time = datetime.now(timezone.utc) + expires_delta
@@ -126,9 +126,10 @@ def login(request: LoginRequest):
 @router.get("/me", response_model=UserInfo)
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     token = credentials.credentials
-    config, engine = get_config_and_engine()
-    schema = config.schema
-    jwt_secret = fetch_secret(engine, schema, "JWT_SECRET")
+    backend = get_backend()
+    schema = backend.schema
+    engine = backend.get_engine()
+    jwt_secret = backend.fetch_secret("JWT_SECRET")
 
     try:
         payload = pyjwt.decode(token, jwt_secret, algorithms=[settings.JWT_ALGORITHM])
@@ -178,8 +179,9 @@ def change_password(body: ChangePasswordRequest, user: dict = Depends(verify_tok
     # request — it fetches Username, IsActive, and roles, and raises 403 if the
     # user is not found or is inactive. It is the shared dependency used across
     # all protected routes (users_routes, connections_routes, etc.).
-    config, engine = get_config_and_engine()
-    schema = config.schema
+    backend = get_backend()
+    schema = backend.schema
+    engine = backend.get_engine()
     uid = user["user_id"]
 
     # Validate before opening a write transaction.

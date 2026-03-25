@@ -8,7 +8,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import settings
-from app.db import fetch_secret
 from app.routes.auth_routes import router as auth_router
 from app.routes.connections_routes import router as connections_router
 from app.routes.discovery_routes import router as discovery_router
@@ -27,8 +26,8 @@ async def lifespan(app: FastAPI):
     # Fails silently on a fresh install so that setup routes are reachable.
     if core_config_exists():
         try:
-            config, engine = init_engine()
-            secret = fetch_secret(engine, config.schema, "JWT_SECRET")
+            backend = init_engine()
+            secret = backend.fetch_secret("JWT_SECRET")
             if not secret:
                 raise ValueError("JWT secret not found in the database.")
             settings.JWT_SECRET = secret
