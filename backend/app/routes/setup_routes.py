@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,7 +16,7 @@ from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
 
 from app.utils.auth_dependency import verify_token, verify_token_string
@@ -68,6 +69,19 @@ class AdminUserInput(BaseModel):
     password: str
 
 
+# Allowlist for PostgreSQL identifiers used in DDL.  Restricts to characters
+# that are safe in both libpq connection strings (dbname=, user=) and as SQL
+# identifiers, making psycopg2.sql.Identifier belt-and-suspenders rather than
+# the sole safety net.
+_PG_IDENT_RE = re.compile(r"^[A-Za-z0-9_]+$")
+
+
+def _pg_ident(value: str, field: str) -> str:
+    if not _PG_IDENT_RE.match(value):
+        raise ValueError(f"{field} must contain only letters, digits, and underscores")
+    return value
+
+
 class PgCreateDbRequest(BaseModel):
     db_host: str
     db_port: int = 5432
@@ -80,6 +94,21 @@ class PgCreateDbRequest(BaseModel):
     use_localhost_alias: bool = False
 
     model_config = {"populate_by_name": True}
+
+    @field_validator("new_db_name")
+    @classmethod
+    def validate_new_db_name(cls, v: str) -> str:
+        return _pg_ident(v, "new_db_name")
+
+    @field_validator("app_user")
+    @classmethod
+    def validate_app_user(cls, v: str) -> str:
+        return _pg_ident(v, "app_user")
+
+    @field_validator("db_schema", mode="before")
+    @classmethod
+    def validate_db_schema(cls, v: str) -> str:
+        return _pg_ident(v, "schema")
 
 
 @router.post("/test-connection")

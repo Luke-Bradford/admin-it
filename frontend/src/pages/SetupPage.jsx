@@ -255,6 +255,14 @@ function StepConnection({ onSaved, initial }) {
   }
 
   async function handleCreateAndSave() {
+    if (!form.superuser) {
+      setFeedback({ type: 'error', message: 'Superuser username is required.' });
+      return;
+    }
+    if (!form.superuserPassword) {
+      setFeedback({ type: 'error', message: 'Superuser password is required.' });
+      return;
+    }
     if (!form.appUserPassword) {
       setFeedback({ type: 'error', message: 'App user password is required.' });
       return;
