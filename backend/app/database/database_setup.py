@@ -19,6 +19,7 @@ def is_core_schema_deployed(engine: Engine, schema: str = "adm") -> bool:
         "ConnectionPermissions",
         "UserConnectionAccess",
         "Secrets",
+        "audit_log",
     ]
 
     try:

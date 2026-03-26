@@ -4,17 +4,57 @@
 # Wraps the existing DatabaseConfig / engine / schema-deployment logic behind
 # the CoreBackend interface so that routes never import MSSQL-specific helpers
 # directly.
+#
+# Audit context: each request that modifies data should set the per-request
+# ContextVar via set_current_user() before the first DB write.  The 'begin'
+# event listener propagates this to SQL Server's SESSION_CONTEXT, which the
+# audit triggers read via SESSION_CONTEXT(N'app_user_id').
 
+import json
 import logging
+from contextvars import ContextVar, Token
 
+from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.sql import text
 
 from app.database.database_setup import deploy_core_schema, is_core_schema_deployed
 from app.db import DatabaseConfig, get_engine
+from app.utils.sql_helpers import quote_ident as qi
 
 logger = logging.getLogger(__name__)
+
+# Per-request context variable carrying the authenticated user's UUID string.
+# Set by the HTTP middleware in main.py; read by the engine 'begin' listener.
+_current_user_id: ContextVar[str | None] = ContextVar("mssql_current_user_id", default=None)
+
+
+def _set_mssql_session_user(conn) -> None:
+    """SQLAlchemy 'begin' event handler.  Sets SESSION_CONTEXT(N'app_user_id') to the
+    current request's user UUID so SQL Server audit triggers can record who made each change.
+
+    sp_set_session_context @read_only=0 allows overwriting within the same pooled connection.
+    Passing NULL clears any previously set value for unauthenticated requests.
+    """
+    uid = _current_user_id.get()
+    conn.execute(
+        text("EXEC sp_set_session_context N'app_user_id', :uid, @read_only=0"),
+        {"uid": uid},
+    )
+
+
+def set_current_user(uid: str | None) -> "Token[str | None]":
+    """Set the per-request user ID for the SQL Server audit trigger.
+
+    Call at the start of each request; pair with reset_current_user() in a finally block.
+    """
+    return _current_user_id.set(uid)
+
+
+def reset_current_user(token: "Token[str | None]") -> None:
+    """Reset the ContextVar to its pre-request state."""
+    _current_user_id.reset(token)
 
 
 class MSSQLBackend:
@@ -25,6 +65,20 @@ class MSSQLBackend:
     def __init__(self, engine: Engine, schema: str) -> None:
         self._engine = engine
         self.schema: str = schema
+        self._register_begin_listener()
+
+    def _register_begin_listener(self) -> None:
+        """Register a SQLAlchemy 'begin' event that sets SESSION_CONTEXT(N'app_user_id').
+
+        SESSION_CONTEXT is connection-scoped on SQL Server, so we explicitly clear it
+        at connection checkout (begin) rather than relying on pool cleanup.
+
+        The listener is registered only once per engine instance; subsequent calls
+        (e.g. from a second MSSQLBackend wrapping the same engine) are no-ops.
+        """
+        if event.contains(self._engine, "begin", _set_mssql_session_user):
+            return
+        event.listen(self._engine, "begin", _set_mssql_session_user)
 
     def get_engine(self) -> Engine:
         return self._engine
@@ -48,7 +102,7 @@ class MSSQLBackend:
         """Fetch a secret value from [schema].[Secrets] by SecretType."""
         with self._engine.connect() as conn:
             result = conn.execute(
-                text(f"SELECT SecretValue FROM [{self.schema}].[Secrets] WHERE SecretType = :st"),
+                text(f"SELECT SecretValue FROM {qi(self.schema, 'Secrets', 'mssql')} WHERE SecretType = :st"),
                 {"st": secret_type},
             ).fetchone()
         if result:
@@ -57,11 +111,41 @@ class MSSQLBackend:
         raise RuntimeError(f"Secret '{secret_type}' not found.")
 
     def get_audit_records(self) -> list[dict]:
-        """Not yet implemented — placeholder for ticket #77.
+        """Return the most recent 1000 audit log entries, newest first."""
+        schema = self.schema
+        with self._engine.connect() as conn:
+            rows = conn.execute(
+                text(f"""
+                    SELECT TOP 1000 id, table_name, record_id, action,
+                                    changed_by, changed_at, old_data, new_data
+                    FROM {qi(schema, "audit_log", "mssql")}
+                    ORDER BY changed_at DESC
+                """)
+            ).fetchall()
+        return [
+            {
+                "id": str(m["id"]),
+                "table_name": m["table_name"],
+                "record_id": str(m["record_id"]) if m["record_id"] else None,
+                "action": m["action"],
+                "changed_by": str(m["changed_by"]) if m["changed_by"] else None,
+                "changed_at": m["changed_at"].isoformat() if m["changed_at"] else None,
+                "old_data": _parse_json(m["old_data"]),
+                "new_data": _parse_json(m["new_data"]),
+            }
+            for r in rows
+            for m in (r._mapping,)
+        ]
 
-        Raises NotImplementedError; the audit UI does not exist yet.
-        """
-        raise NotImplementedError("Audit records not yet implemented for MSSQLBackend (ticket #77)")
+
+def _parse_json(value: str | None):
+    """Parse a JSON string from the MSSQL FOR JSON AUTO column, or return None."""
+    if value is None:
+        return None
+    try:
+        return json.loads(value)
+    except (ValueError, TypeError):
+        return value
 
 
 def create_mssql_backend(core: dict) -> MSSQLBackend:
