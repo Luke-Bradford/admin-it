@@ -265,6 +265,10 @@ function StepConnection({ onSaved, initial }) {
       setFeedback({ type: 'error', message: 'Superuser password is required.' });
       return;
     }
+    if (!form.newDatabase) {
+      setFeedback({ type: 'error', message: 'New database name is required.' });
+      return;
+    }
     if (!form.appUserPassword) {
       setFeedback({ type: 'error', message: 'App user password is required.' });
       return;
