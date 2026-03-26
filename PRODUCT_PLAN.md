@@ -507,8 +507,7 @@ This gives the same query interface as the SQL Server audit log — the audit UI
 
 ## Immediate next actions (in order)
 
-Phase 1 hardening is complete. Phase 2 (connection and user management) is done. Phase 1.5 (frontend overhaul) is done. Remaining work in priority order:
+Phase 1 hardening is complete. Phase 2 (connection and user management) is done. Phase 1.5 (frontend overhaul) is done. Phase 2.5 setup wizard multi-database support is done (#75, #76, #77, #78 done). Remaining work in priority order:
 
-1. **#78 — Setup wizard: database type picker** — wire new backends into the wizard UI (#75, #76, #77 done)
-2. **#79 — Detect existing install — connect-only mode**
-3. Then Phase 3 (data browser) — the core end-user value
+1. **#79 — Detect existing install — connect-only mode**
+2. Then Phase 3 (data browser) — the core end-user value
