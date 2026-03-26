@@ -649,6 +649,7 @@ function StepDeploy({ onDeployed, onConnectExisting }) {
     async function detect() {
       try {
         const res = await fetch('/api/setup/deploy-status');
+        if (!res.ok) throw new Error('Detection failed');
         const body = await res.json();
         setExistingInstall(body.deployed === true);
       } catch {
@@ -663,14 +664,22 @@ function StepDeploy({ onDeployed, onConnectExisting }) {
     setLoading(true);
     setFeedback(null);
     try {
+      const headers = { 'Content-Type': 'application/json' };
+      if (force) {
+        // force=true requires a SystemAdmin JWT — include it from localStorage.
+        const token = localStorage.getItem('token');
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+      }
       const url = force ? '/api/setup/deploy-schema?force=true' : '/api/setup/deploy-schema';
-      const res = await fetch(url, { method: 'POST' });
+      const res = await fetch(url, { method: 'POST', headers });
       const body = await res.json();
       if (!res.ok) throw new Error(body.detail ?? 'Deployment failed.');
       setFeedback({ type: 'success', message: body.message ?? 'Schema deployed successfully.' });
       onDeployed();
     } catch (e) {
       setFeedback({ type: 'error', message: e.message });
+      // Reset confirmation state so the UI returns to the detection banner.
+      setRedeployMode('idle');
     } finally {
       setLoading(false);
     }

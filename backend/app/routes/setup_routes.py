@@ -320,11 +320,28 @@ def check_deploy_status():
 
 
 @router.post("/deploy-schema")
-def trigger_deploy_schema(force: bool = False):
+def trigger_deploy_schema(
+    force: bool = False,
+    credentials: HTTPAuthorizationCredentials | None = Depends(_optional_bearer),
+):
     """
-    Deploy the core schema.  Pass `?force=true` to re-deploy even when the
-    schema already exists (disaster-recovery / existing-install path).
+    Deploy the core schema.
+
+    `force=false` (default): no-op if already deployed; safe to call without
+    authentication during the initial setup wizard flow.
+
+    `force=true`: re-deploys even when the schema already exists (disaster-
+    recovery path). Requires a valid SystemAdmin JWT because the schema can
+    only be deployed at this point, meaning setup was previously completed and
+    an authenticated admin is making a deliberate decision to overwrite it.
     """
+    if force:
+        if credentials is None:
+            raise HTTPException(status_code=401, detail="Authorization required for force re-deploy")
+        user = verify_token_string(credentials.credentials)
+        if "SystemAdmin" not in user.get("roles", []):
+            raise HTTPException(status_code=403, detail="SystemAdmin role required for force re-deploy")
+
     try:
         from app.utils.db_helpers import get_backend  # noqa: PLC0415
 
