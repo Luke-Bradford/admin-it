@@ -151,6 +151,159 @@ CREATE TABLE [' + @SchemaName + '].[Secrets] (
 ';
 
 -----------------------------------------
+-- AUDIT LOG
+-- Not system-versioned: it is an append-only event log.
+-- old_data / new_data stored as NVARCHAR(MAX) JSON.
+-----------------------------------------
+SET @sql += '
+IF NOT EXISTS (SELECT 1 FROM sys.tables t
+               JOIN sys.schemas s ON t.schema_id = s.schema_id
+               WHERE s.name = ''' + @SchemaName + ''' AND t.name = ''audit_log'')
+BEGIN
+    CREATE TABLE [' + @SchemaName + '].[audit_log] (
+        id            UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID(),
+        table_name    NVARCHAR(100)    NOT NULL,
+        record_id     UNIQUEIDENTIFIER NULL,
+        action        NVARCHAR(10)     NOT NULL,
+        changed_by    UNIQUEIDENTIFIER NULL,
+        changed_at    DATETIME2        NOT NULL DEFAULT SYSUTCDATETIME(),
+        old_data      NVARCHAR(MAX)    NULL,
+        new_data      NVARCHAR(MAX)    NULL,
+        PRIMARY KEY (id),
+        CONSTRAINT chk_audit_log_action CHECK (action IN (''INSERT'', ''UPDATE'', ''DELETE''))
+    );
+END
+';
+
+-----------------------------------------
+-- AUDIT TRIGGERS
+-- One trigger per audited table.  Each trigger writes one row to audit_log
+-- per statement (not per row) using FOR JSON AUTO.  The application user
+-- identity is stored in SESSION_CONTEXT(N''app_user_id''), set by the
+-- SQLAlchemy connection event in mssql_backend.py.
+-- DROP + CREATE keeps the script idempotent.
+-----------------------------------------
+SET @sql += '
+IF EXISTS (SELECT 1 FROM sys.triggers WHERE name = ''trg_audit_Users''
+           AND parent_id = OBJECT_ID(''' + @SchemaName + '.Users''))
+    DROP TRIGGER [' + @SchemaName + '].[trg_audit_Users];
+';
+SET @sql += '
+CREATE TRIGGER [' + @SchemaName + '].[trg_audit_Users]
+ON [' + @SchemaName + '].[Users]
+AFTER INSERT, UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @action NVARCHAR(10);
+    IF EXISTS (SELECT 1 FROM inserted) AND EXISTS (SELECT 1 FROM deleted)
+        SET @action = ''UPDATE'';
+    ELSE IF EXISTS (SELECT 1 FROM inserted)
+        SET @action = ''INSERT'';
+    ELSE
+        SET @action = ''DELETE'';
+
+    DECLARE @uid UNIQUEIDENTIFIER = TRY_CAST(CAST(SESSION_CONTEXT(N''app_user_id'') AS NVARCHAR(36)) AS UNIQUEIDENTIFIER);
+    DECLARE @rid UNIQUEIDENTIFIER = CASE @action WHEN ''DELETE'' THEN (SELECT TOP 1 UserId FROM deleted) ELSE (SELECT TOP 1 UserId FROM inserted) END;
+    DECLARE @old NVARCHAR(MAX) = CASE WHEN @action IN (''UPDATE'', ''DELETE'') THEN (SELECT * FROM deleted FOR JSON AUTO) ELSE NULL END;
+    DECLARE @new NVARCHAR(MAX) = CASE WHEN @action IN (''INSERT'', ''UPDATE'') THEN (SELECT * FROM inserted FOR JSON AUTO) ELSE NULL END;
+
+    INSERT INTO [' + @SchemaName + '].[audit_log] (table_name, record_id, action, changed_by, old_data, new_data)
+    VALUES (''Users'', @rid, @action, @uid, @old, @new);
+END
+';
+
+SET @sql += '
+IF EXISTS (SELECT 1 FROM sys.triggers WHERE name = ''trg_audit_Connections''
+           AND parent_id = OBJECT_ID(''' + @SchemaName + '.Connections''))
+    DROP TRIGGER [' + @SchemaName + '].[trg_audit_Connections];
+';
+SET @sql += '
+CREATE TRIGGER [' + @SchemaName + '].[trg_audit_Connections]
+ON [' + @SchemaName + '].[Connections]
+AFTER INSERT, UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @action NVARCHAR(10);
+    IF EXISTS (SELECT 1 FROM inserted) AND EXISTS (SELECT 1 FROM deleted)
+        SET @action = ''UPDATE'';
+    ELSE IF EXISTS (SELECT 1 FROM inserted)
+        SET @action = ''INSERT'';
+    ELSE
+        SET @action = ''DELETE'';
+
+    DECLARE @uid UNIQUEIDENTIFIER = TRY_CAST(CAST(SESSION_CONTEXT(N''app_user_id'') AS NVARCHAR(36)) AS UNIQUEIDENTIFIER);
+    DECLARE @rid UNIQUEIDENTIFIER = CASE @action WHEN ''DELETE'' THEN (SELECT TOP 1 ConnectionId FROM deleted) ELSE (SELECT TOP 1 ConnectionId FROM inserted) END;
+    DECLARE @old NVARCHAR(MAX) = CASE WHEN @action IN (''UPDATE'', ''DELETE'') THEN (SELECT * FROM deleted FOR JSON AUTO) ELSE NULL END;
+    DECLARE @new NVARCHAR(MAX) = CASE WHEN @action IN (''INSERT'', ''UPDATE'') THEN (SELECT * FROM inserted FOR JSON AUTO) ELSE NULL END;
+
+    INSERT INTO [' + @SchemaName + '].[audit_log] (table_name, record_id, action, changed_by, old_data, new_data)
+    VALUES (''Connections'', @rid, @action, @uid, @old, @new);
+END
+';
+
+SET @sql += '
+IF EXISTS (SELECT 1 FROM sys.triggers WHERE name = ''trg_audit_ConnectionPermissions''
+           AND parent_id = OBJECT_ID(''' + @SchemaName + '.ConnectionPermissions''))
+    DROP TRIGGER [' + @SchemaName + '].[trg_audit_ConnectionPermissions];
+';
+SET @sql += '
+CREATE TRIGGER [' + @SchemaName + '].[trg_audit_ConnectionPermissions]
+ON [' + @SchemaName + '].[ConnectionPermissions]
+AFTER INSERT, UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @action NVARCHAR(10);
+    IF EXISTS (SELECT 1 FROM inserted) AND EXISTS (SELECT 1 FROM deleted)
+        SET @action = ''UPDATE'';
+    ELSE IF EXISTS (SELECT 1 FROM inserted)
+        SET @action = ''INSERT'';
+    ELSE
+        SET @action = ''DELETE'';
+
+    DECLARE @uid UNIQUEIDENTIFIER = TRY_CAST(CAST(SESSION_CONTEXT(N''app_user_id'') AS NVARCHAR(36)) AS UNIQUEIDENTIFIER);
+    DECLARE @rid UNIQUEIDENTIFIER = CASE @action WHEN ''DELETE'' THEN (SELECT TOP 1 PermissionId FROM deleted) ELSE (SELECT TOP 1 PermissionId FROM inserted) END;
+    DECLARE @old NVARCHAR(MAX) = CASE WHEN @action IN (''UPDATE'', ''DELETE'') THEN (SELECT * FROM deleted FOR JSON AUTO) ELSE NULL END;
+    DECLARE @new NVARCHAR(MAX) = CASE WHEN @action IN (''INSERT'', ''UPDATE'') THEN (SELECT * FROM inserted FOR JSON AUTO) ELSE NULL END;
+
+    INSERT INTO [' + @SchemaName + '].[audit_log] (table_name, record_id, action, changed_by, old_data, new_data)
+    VALUES (''ConnectionPermissions'', @rid, @action, @uid, @old, @new);
+END
+';
+
+SET @sql += '
+IF EXISTS (SELECT 1 FROM sys.triggers WHERE name = ''trg_audit_Secrets''
+           AND parent_id = OBJECT_ID(''' + @SchemaName + '.Secrets''))
+    DROP TRIGGER [' + @SchemaName + '].[trg_audit_Secrets];
+';
+SET @sql += '
+CREATE TRIGGER [' + @SchemaName + '].[trg_audit_Secrets]
+ON [' + @SchemaName + '].[Secrets]
+AFTER INSERT, UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @action NVARCHAR(10);
+    IF EXISTS (SELECT 1 FROM inserted) AND EXISTS (SELECT 1 FROM deleted)
+        SET @action = ''UPDATE'';
+    ELSE IF EXISTS (SELECT 1 FROM inserted)
+        SET @action = ''INSERT'';
+    ELSE
+        SET @action = ''DELETE'';
+
+    DECLARE @uid UNIQUEIDENTIFIER = TRY_CAST(CAST(SESSION_CONTEXT(N''app_user_id'') AS NVARCHAR(36)) AS UNIQUEIDENTIFIER);
+    DECLARE @rid UNIQUEIDENTIFIER = CASE @action WHEN ''DELETE'' THEN (SELECT TOP 1 SecretId FROM deleted) ELSE (SELECT TOP 1 SecretId FROM inserted) END;
+    DECLARE @old NVARCHAR(MAX) = CASE WHEN @action IN (''UPDATE'', ''DELETE'') THEN (SELECT * FROM deleted FOR JSON AUTO) ELSE NULL END;
+    DECLARE @new NVARCHAR(MAX) = CASE WHEN @action IN (''INSERT'', ''UPDATE'') THEN (SELECT * FROM inserted FOR JSON AUTO) ELSE NULL END;
+
+    INSERT INTO [' + @SchemaName + '].[audit_log] (table_name, record_id, action, changed_by, old_data, new_data)
+    VALUES (''Secrets'', @rid, @action, @uid, @old, @new);
+END
+';
+
+-----------------------------------------
 -- Seed Data for Roles and Permissions
 -----------------------------------------
 SET @sql += '

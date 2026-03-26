@@ -62,18 +62,41 @@ app.add_middleware(
 )
 
 
+def _extract_uid(request: Request) -> str | None:
+    """Decode the JWT bearer token and return the subject UUID, or None.
+
+    Expiry is intentionally not verified — full validation happens inside
+    each route via auth_dependency.  This is used only to populate the
+    DB-level audit context so triggers can record who made each change.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer ") or not settings.JWT_SECRET:
+        return None
+    try:
+        payload = pyjwt.decode(
+            auth_header[len("Bearer ") :],
+            settings.JWT_SECRET,
+            algorithms=["HS256"],
+            options={"verify_exp": False},
+        )
+        return payload.get("sub")
+    except Exception:
+        logger.debug("[set_db_user_context] JWT decode failed; audit context will be NULL", exc_info=True)
+        return None
+
+
 @app.middleware("http")
 async def set_db_user_context(request: Request, call_next):
-    """Populate the per-request ContextVar used by the PostgreSQL audit trigger.
+    """Populate the per-request ContextVar used by the audit trigger on both backends.
 
     Decodes the JWT (without verifying expiry — full validation happens inside
     the route via auth_dependency) to extract the user's UUID, then stores it
-    via postgres_backend.set_current_user().  The PostgreSQL backend's 'begin'
-    event listener reads this value and sets the Postgres session variable
-    app.current_user_id so audit triggers can record who made each change.
+    via the active backend's set_current_user().
 
-    Skipped entirely when the active backend is not Postgres, so psycopg2 is
-    never imported on MSSQL-only deployments.
+    - Postgres: propagated to app.current_user_id via set_config() in the 'begin' listener.
+    - MSSQL: propagated to SESSION_CONTEXT(N'app_user_id') via sp_set_session_context.
+
+    Skipped entirely if the backend is not yet initialised (fresh install, setup not complete).
     """
     try:
         from app.utils.db_helpers import get_backend  # noqa: PLC0415
@@ -82,28 +105,15 @@ async def set_db_user_context(request: Request, call_next):
     except Exception:
         return await call_next(request)
 
-    if backend.db_type != "postgres":
-        return await call_next(request)
-
     try:
-        from app.backends.postgres_backend import reset_current_user, set_current_user  # noqa: PLC0415
+        if backend.db_type == "postgres":
+            from app.backends.postgres_backend import reset_current_user, set_current_user  # noqa: PLC0415
+        elif backend.db_type == "mssql":
+            from app.backends.mssql_backend import reset_current_user, set_current_user  # noqa: PLC0415
+        else:
+            return await call_next(request)
 
-        uid: str | None = None
-        auth_header = request.headers.get("Authorization", "")
-        if auth_header.startswith("Bearer ") and settings.JWT_SECRET:
-            token = auth_header[len("Bearer ") :]
-            try:
-                payload = pyjwt.decode(
-                    token,
-                    settings.JWT_SECRET,
-                    algorithms=["HS256"],
-                    options={"verify_exp": False},
-                )
-                uid = payload.get("sub")
-            except Exception:
-                logger.debug("[set_db_user_context] JWT decode failed; audit context will be NULL", exc_info=True)
-
-        ctx_token = set_current_user(uid)
+        ctx_token = set_current_user(_extract_uid(request))
         try:
             return await call_next(request)
         finally:
