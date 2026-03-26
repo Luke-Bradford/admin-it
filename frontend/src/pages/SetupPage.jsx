@@ -255,6 +255,10 @@ function StepConnection({ onSaved, initial }) {
   }
 
   async function handleCreateAndSave() {
+    if (!form.appUserPassword) {
+      setFeedback({ type: 'error', message: 'App user password is required.' });
+      return;
+    }
     setLoading(true);
     setFeedback(null);
     try {

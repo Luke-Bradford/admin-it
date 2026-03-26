@@ -89,15 +89,15 @@ async def test_connection(details: ConnDetails):
 
     try:
         if details.db_type == "postgres":
-            conn = psycopg2.connect(
+            with psycopg2.connect(
                 host=resolved_host,
                 port=details.db_port,
                 user=details.db_user,
                 password=details.db_password,
                 dbname=details.db_name,
                 connect_timeout=5,
-            )
-            conn.close()
+            ):
+                pass
         else:
             cs = (
                 f"DRIVER={{{details.odbc_driver}}};"
@@ -107,8 +107,8 @@ async def test_connection(details: ConnDetails):
                 f"PWD={details.db_password}"
                 + (";Encrypt=yes;TrustServerCertificate=yes" if "18" in details.odbc_driver else "")
             )
-            conn = pyodbc.connect(cs, timeout=5)
-            conn.close()
+            with pyodbc.connect(cs, timeout=5):
+                pass
         return {"status": "success", "message": "Connection OK"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
