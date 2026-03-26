@@ -70,6 +70,7 @@ function Feedback({ message, type }) {
 
 const DEFAULT_MSSQL_FORM = {
   dbType: 'mssql',
+  pgMode: null,
   host: '',
   useLocalhostAlias: false,
   port: '1433',
@@ -164,10 +165,6 @@ function StepConnection({ onSaved, initial }) {
     return base;
   }
 
-  function buildSavePayload() {
-    return buildTestPayload();
-  }
-
   function buildCreateDbPayload() {
     return {
       db_host: form.host,
@@ -242,7 +239,7 @@ function StepConnection({ onSaved, initial }) {
       const res = await fetch('/api/setup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildSavePayload()),
+        body: JSON.stringify(buildTestPayload()),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.detail ?? body.message ?? 'Save failed.');
@@ -268,16 +265,10 @@ function StepConnection({ onSaved, initial }) {
       if (!createRes.ok) throw new Error(createBody.detail ?? 'Failed to create database.');
 
       // Step 2: save the app-user connection as the core config.
-      const connDetails = {
-        db_type: 'postgres',
-        db_host: form.host,
-        db_port: parseInt(form.port, 10) || 5432,
-        db_user: form.appUser,
-        db_password: form.appUserPassword,
-        db_name: form.newDatabase,
-        schema: form.schema,
-        use_localhost_alias: form.useLocalhostAlias,
-      };
+      // Use the connection object returned by the backend (canonical form) rather
+      // than re-assembling from form state, so any server-side normalisation is
+      // preserved. The app-user password must be appended as it is not echoed back.
+      const connDetails = { ...createBody.connection, db_password: form.appUserPassword };
       const saveRes = await fetch('/api/setup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

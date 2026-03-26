@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Literal
 
 import psycopg2
+import psycopg2.sql
 import pyodbc
 from cryptography.fernet import Fernet, InvalidToken
 from dotenv import load_dotenv
@@ -118,68 +119,79 @@ async def create_postgres_db(req: PgCreateDbRequest):
     """
     PostgreSQL create-new-database path.
 
+    Only callable before setup is complete — once the core config exists this
+    endpoint returns 403 so it cannot be used as a post-install relay for
+    arbitrary superuser credentials.
+
     Connects with superuser credentials, creates the target database and a
     restricted application user, then returns the app-user credentials so the
     caller can proceed with the normal setup flow.  Superuser credentials are
     NOT persisted anywhere after this request completes.
     """
+    if core_config_exists():
+        raise HTTPException(status_code=403, detail="Setup already complete.")
+
     resolved_host = resolve_hostname(req.db_host, use_localhost_alias=req.use_localhost_alias)
     logger.debug("[create-postgres-db] Using resolved host: %s", resolved_host)
 
+    # Safe identifier composition — psycopg2.sql.Identifier handles quoting and
+    # escaping so that values containing double-quotes cannot break out of the
+    # identifier context.
+    db_ident = psycopg2.sql.Identifier(req.new_db_name)
+    user_ident = psycopg2.sql.Identifier(req.app_user)
+    schema_ident = psycopg2.sql.Identifier(req.db_schema)
+
     try:
         # Connect to the default 'postgres' maintenance DB as superuser.
-        su_conn = psycopg2.connect(
+        with psycopg2.connect(
             host=resolved_host,
             port=req.db_port,
             user=req.superuser,
             password=req.superuser_password,
             dbname="postgres",
             connect_timeout=5,
-        )
-        su_conn.autocommit = True
-        cur = su_conn.cursor()
+        ) as su_conn:
+            su_conn.autocommit = True
+            with su_conn.cursor() as cur:
+                # Create the database (skip if it already exists).
+                cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (req.new_db_name,))
+                if not cur.fetchone():
+                    cur.execute(psycopg2.sql.SQL("CREATE DATABASE {}").format(db_ident))
 
-        # Create the database (skip if it already exists).
-        cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (req.new_db_name,))
-        if not cur.fetchone():
-            cur.execute(f'CREATE DATABASE "{req.new_db_name}"')
+                # Create the app user (skip if it already exists).
+                cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (req.app_user,))
+                if not cur.fetchone():
+                    cur.execute(
+                        psycopg2.sql.SQL("CREATE USER {} WITH PASSWORD %s").format(user_ident),
+                        (req.app_user_password,),
+                    )
 
-        # Create the app user (skip if it already exists).
-        cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (req.app_user,))
-        if not cur.fetchone():
-            cur.execute(
-                f'CREATE USER "{req.app_user}" WITH PASSWORD %s',
-                (req.app_user_password,),
-            )
+                # Grant connect privilege on the new database.
+                cur.execute(psycopg2.sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(db_ident, user_ident))
 
-        # Grant connect + schema-level privileges on the new database.
-        cur.execute(f'GRANT CONNECT ON DATABASE "{req.new_db_name}" TO "{req.app_user}"')
-        cur.close()
-        su_conn.close()
-
-        # Connect to the new database to grant schema and future object privileges.
-        db_conn = psycopg2.connect(
+        # Connect to the new database to grant schema and future-object privileges.
+        with psycopg2.connect(
             host=resolved_host,
             port=req.db_port,
             user=req.superuser,
             password=req.superuser_password,
             dbname=req.new_db_name,
             connect_timeout=5,
-        )
-        db_conn.autocommit = True
-        cur2 = db_conn.cursor()
-        schema = req.db_schema
-        cur2.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
-        cur2.execute(f'GRANT USAGE ON SCHEMA "{schema}" TO "{req.app_user}"')
-        cur2.execute(
-            f'ALTER DEFAULT PRIVILEGES IN SCHEMA "{schema}" '
-            f'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "{req.app_user}"'
-        )
-        cur2.execute(
-            f'ALTER DEFAULT PRIVILEGES IN SCHEMA "{schema}" GRANT USAGE, SELECT ON SEQUENCES TO "{req.app_user}"'
-        )
-        cur2.close()
-        db_conn.close()
+        ) as db_conn:
+            db_conn.autocommit = True
+            with db_conn.cursor() as cur2:
+                cur2.execute(psycopg2.sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(schema_ident))
+                cur2.execute(psycopg2.sql.SQL("GRANT USAGE ON SCHEMA {} TO {}").format(schema_ident, user_ident))
+                cur2.execute(
+                    psycopg2.sql.SQL(
+                        "ALTER DEFAULT PRIVILEGES IN SCHEMA {} GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {}"
+                    ).format(schema_ident, user_ident)
+                )
+                cur2.execute(
+                    psycopg2.sql.SQL(
+                        "ALTER DEFAULT PRIVILEGES IN SCHEMA {} GRANT USAGE, SELECT ON SEQUENCES TO {}"
+                    ).format(schema_ident, user_ident)
+                )
     except psycopg2.Error as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

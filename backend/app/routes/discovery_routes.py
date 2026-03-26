@@ -53,19 +53,18 @@ def list_databases(request: DatabaseDiscoveryRequest):
         logging.info("[discovery] Connecting to %s:%s as %s", resolved_host, request.port, request.user)
 
         if request.db_type == "postgres":
-            conn = psycopg2.connect(
+            with psycopg2.connect(
                 host=resolved_host,
                 port=request.port,
                 user=request.user,
                 password=request.password,
                 dbname="postgres",
                 connect_timeout=5,
-            )
-            cur = conn.cursor()
-            # Exclude template databases
-            cur.execute("SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname")
-            dbs = [row[0] for row in cur.fetchall()]
-            conn.close()
+            ) as conn:
+                with conn.cursor() as cur:
+                    # Exclude template databases
+                    cur.execute("SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname")
+                    dbs = [row[0] for row in cur.fetchall()]
         else:
             cs = (
                 f"DRIVER={{{request.driver}}};"
@@ -74,11 +73,10 @@ def list_databases(request: DatabaseDiscoveryRequest):
                 f"PWD={request.password};"
                 "Encrypt=yes;TrustServerCertificate=yes"
             )
-            conn = pyodbc.connect(cs, timeout=5)
-            cursor = conn.cursor()
-            cursor.execute("SELECT name FROM sys.databases WHERE database_id > 4")
-            dbs = [row[0] for row in cursor.fetchall()]
-            conn.close()
+            with pyodbc.connect(cs, timeout=5) as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("SELECT name FROM sys.databases WHERE database_id > 4")
+                    dbs = [row[0] for row in cursor.fetchall()]
 
         return {"databases": dbs}
     except (pyodbc.Error, psycopg2.Error) as e:
