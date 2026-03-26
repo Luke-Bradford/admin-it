@@ -192,6 +192,18 @@ async def create_postgres_db(req: PgCreateDbRequest):
                         "ALTER DEFAULT PRIVILEGES IN SCHEMA {} GRANT USAGE, SELECT ON SEQUENCES TO {}"
                     ).format(schema_ident, user_ident)
                 )
+                # Cover tables that already exist in the schema (e.g. retry after
+                # partial failure, or deploy ran as a different user).
+                cur2.execute(
+                    psycopg2.sql.SQL("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {} TO {}").format(
+                        schema_ident, user_ident
+                    )
+                )
+                cur2.execute(
+                    psycopg2.sql.SQL("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {}").format(
+                        schema_ident, user_ident
+                    )
+                )
     except psycopg2.Error as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

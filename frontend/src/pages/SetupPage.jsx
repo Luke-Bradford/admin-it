@@ -180,15 +180,18 @@ function StepConnection({ onSaved, initial }) {
   }
 
   function buildDiscoverPayload() {
-    return {
+    const payload = {
       db_type: form.dbType,
       host: form.host,
       port: parseInt(form.port, 10) || (form.dbType === 'postgres' ? 5432 : 1433),
       user: form.user,
       password: form.password,
-      driver: form.driver ?? ODBC_DRIVERS[0],
       use_localhost_alias: form.useLocalhostAlias,
     };
+    if (form.dbType === 'mssql') {
+      payload.driver = form.driver ?? ODBC_DRIVERS[0];
+    }
+    return payload;
   }
 
   async function handleDiscover() {
