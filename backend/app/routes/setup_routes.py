@@ -2,17 +2,21 @@
 
 import logging
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
+import psycopg2
+import psycopg2.sql
 import pyodbc
 from cryptography.fernet import Fernet, InvalidToken
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
 
 from app.utils.auth_dependency import verify_token, verify_token_string
@@ -46,6 +50,7 @@ fernet = Fernet(FERNET_KEY.encode())
 
 
 class ConnDetails(BaseModel):
+    db_type: Literal["mssql", "postgres"] = "mssql"
     db_host: str
     db_port: int
     db_user: str
@@ -64,25 +69,188 @@ class AdminUserInput(BaseModel):
     password: str
 
 
+# Allowlist for PostgreSQL identifiers used in DDL.  Restricts to characters
+# that are safe in both libpq connection strings (dbname=, user=) and as SQL
+# identifiers, making psycopg2.sql.Identifier belt-and-suspenders rather than
+# the sole safety net.
+_PG_IDENT_RE = re.compile(r"^[A-Za-z0-9_]+$")
+
+
+def _pg_ident(value: str, field: str) -> str:
+    if not _PG_IDENT_RE.match(value):
+        raise ValueError(f"{field} must contain only letters, digits, and underscores")
+    return value
+
+
+class PgCreateDbRequest(BaseModel):
+    db_host: str
+    db_port: int = 5432
+    superuser: str
+    superuser_password: str
+    new_db_name: str
+    app_user: str = "adminit_app"
+    app_user_password: str
+    db_schema: str = Field("adm", alias="schema")
+    use_localhost_alias: bool = False
+
+    model_config = {"populate_by_name": True}
+
+    @field_validator("new_db_name")
+    @classmethod
+    def validate_new_db_name(cls, v: str) -> str:
+        return _pg_ident(v, "new_db_name")
+
+    @field_validator("app_user")
+    @classmethod
+    def validate_app_user(cls, v: str) -> str:
+        return _pg_ident(v, "app_user")
+
+    @field_validator("db_schema", mode="before")
+    @classmethod
+    def validate_db_schema(cls, v: str) -> str:
+        return _pg_ident(v, "schema")
+
+
 @router.post("/test-connection")
 async def test_connection(details: ConnDetails):
     resolved_host = resolve_hostname(details.db_host, use_localhost_alias=details.use_localhost_alias)
     logger.debug("[test-connection] Using resolved host: %s", resolved_host)
 
-    cs = (
-        f"DRIVER={{{details.odbc_driver}}};"
-        f"SERVER={resolved_host},{details.db_port};"
-        f"DATABASE={details.db_name};"
-        f"UID={details.db_user};"
-        f"PWD={details.db_password}"
-        + (";Encrypt=yes;TrustServerCertificate=yes" if "18" in details.odbc_driver else "")
-    )
     try:
-        conn = pyodbc.connect(cs, timeout=5)
-        conn.close()
+        if details.db_type == "postgres":
+            with psycopg2.connect(
+                host=resolved_host,
+                port=details.db_port,
+                user=details.db_user,
+                password=details.db_password,
+                dbname=details.db_name,
+                connect_timeout=5,
+            ):
+                pass
+        else:
+            cs = (
+                f"DRIVER={{{details.odbc_driver}}};"
+                f"SERVER={resolved_host},{details.db_port};"
+                f"DATABASE={details.db_name};"
+                f"UID={details.db_user};"
+                f"PWD={details.db_password}"
+                + (";Encrypt=yes;TrustServerCertificate=yes" if "18" in details.odbc_driver else "")
+            )
+            with pyodbc.connect(cs, timeout=5):
+                pass
         return {"status": "success", "message": "Connection OK"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/create-postgres-db")
+async def create_postgres_db(req: PgCreateDbRequest):
+    """
+    PostgreSQL create-new-database path.
+
+    Only callable before setup is complete — once the core config exists this
+    endpoint returns 403 so it cannot be used as a post-install relay for
+    arbitrary superuser credentials.
+
+    Connects with superuser credentials, creates the target database and a
+    restricted application user, then returns the app-user credentials so the
+    caller can proceed with the normal setup flow.  Superuser credentials are
+    NOT persisted anywhere after this request completes.
+    """
+    if core_config_exists():
+        raise HTTPException(status_code=403, detail="Setup already complete.")
+
+    resolved_host = resolve_hostname(req.db_host, use_localhost_alias=req.use_localhost_alias)
+    logger.debug("[create-postgres-db] Using resolved host: %s", resolved_host)
+
+    # Safe identifier composition — psycopg2.sql.Identifier handles quoting and
+    # escaping so that values containing double-quotes cannot break out of the
+    # identifier context.
+    db_ident = psycopg2.sql.Identifier(req.new_db_name)
+    user_ident = psycopg2.sql.Identifier(req.app_user)
+    schema_ident = psycopg2.sql.Identifier(req.db_schema)
+
+    try:
+        # Connect to the default 'postgres' maintenance DB as superuser.
+        with psycopg2.connect(
+            host=resolved_host,
+            port=req.db_port,
+            user=req.superuser,
+            password=req.superuser_password,
+            dbname="postgres",
+            connect_timeout=5,
+        ) as su_conn:
+            su_conn.autocommit = True
+            with su_conn.cursor() as cur:
+                # Create the database (skip if it already exists).
+                cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (req.new_db_name,))
+                if not cur.fetchone():
+                    cur.execute(psycopg2.sql.SQL("CREATE DATABASE {}").format(db_ident))
+
+                # Create the app user (skip if it already exists).
+                cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (req.app_user,))
+                if not cur.fetchone():
+                    cur.execute(
+                        psycopg2.sql.SQL("CREATE USER {} WITH PASSWORD %s").format(user_ident),
+                        (req.app_user_password,),
+                    )
+
+                # Grant connect privilege on the new database.
+                cur.execute(psycopg2.sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(db_ident, user_ident))
+
+        # Connect to the new database to grant schema and future-object privileges.
+        with psycopg2.connect(
+            host=resolved_host,
+            port=req.db_port,
+            user=req.superuser,
+            password=req.superuser_password,
+            dbname=req.new_db_name,
+            connect_timeout=5,
+        ) as db_conn:
+            db_conn.autocommit = True
+            with db_conn.cursor() as cur2:
+                cur2.execute(psycopg2.sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(schema_ident))
+                cur2.execute(psycopg2.sql.SQL("GRANT USAGE ON SCHEMA {} TO {}").format(schema_ident, user_ident))
+                cur2.execute(
+                    psycopg2.sql.SQL(
+                        "ALTER DEFAULT PRIVILEGES IN SCHEMA {} GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {}"
+                    ).format(schema_ident, user_ident)
+                )
+                cur2.execute(
+                    psycopg2.sql.SQL(
+                        "ALTER DEFAULT PRIVILEGES IN SCHEMA {} GRANT USAGE, SELECT ON SEQUENCES TO {}"
+                    ).format(schema_ident, user_ident)
+                )
+                # Cover tables that already exist in the schema (e.g. retry after
+                # partial failure, or deploy ran as a different user).
+                cur2.execute(
+                    psycopg2.sql.SQL("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {} TO {}").format(
+                        schema_ident, user_ident
+                    )
+                )
+                cur2.execute(
+                    psycopg2.sql.SQL("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {}").format(
+                        schema_ident, user_ident
+                    )
+                )
+    except psycopg2.Error as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return {
+        "status": "success",
+        "message": f"Database '{req.new_db_name}' created with user '{req.app_user}'.",
+        "connection": {
+            "db_type": "postgres",
+            "db_host": req.db_host,
+            "db_port": req.db_port,
+            "db_name": req.new_db_name,
+            "db_user": req.app_user,
+            "schema": req.db_schema,
+            "use_localhost_alias": req.use_localhost_alias,
+        },
+    }
 
 
 @router.post("")
