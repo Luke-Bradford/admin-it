@@ -320,13 +320,17 @@ def check_deploy_status():
 
 
 @router.post("/deploy-schema")
-def trigger_deploy_schema():
+def trigger_deploy_schema(force: bool = False):
+    """
+    Deploy the core schema.  Pass `?force=true` to re-deploy even when the
+    schema already exists (disaster-recovery / existing-install path).
+    """
     try:
         from app.utils.db_helpers import get_backend  # noqa: PLC0415
 
         backend = get_backend()
 
-        if backend.is_schema_deployed():
+        if backend.is_schema_deployed() and not force:
             return JSONResponse(status_code=200, content={"message": "Schema already deployed."})
 
         backend.deploy_schema()
