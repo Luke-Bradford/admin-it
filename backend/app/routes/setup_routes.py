@@ -5,7 +5,9 @@ import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
+import psycopg2
 import pyodbc
 from cryptography.fernet import Fernet, InvalidToken
 from dotenv import load_dotenv
@@ -46,6 +48,7 @@ fernet = Fernet(FERNET_KEY.encode())
 
 
 class ConnDetails(BaseModel):
+    db_type: Literal["mssql", "postgres"] = "mssql"
     db_host: str
     db_port: int
     db_user: str
@@ -64,25 +67,137 @@ class AdminUserInput(BaseModel):
     password: str
 
 
+class PgCreateDbRequest(BaseModel):
+    db_host: str
+    db_port: int = 5432
+    superuser: str
+    superuser_password: str
+    new_db_name: str
+    app_user: str = "adminit_app"
+    app_user_password: str
+    db_schema: str = Field("adm", alias="schema")
+    use_localhost_alias: bool = False
+
+    model_config = {"populate_by_name": True}
+
+
 @router.post("/test-connection")
 async def test_connection(details: ConnDetails):
     resolved_host = resolve_hostname(details.db_host, use_localhost_alias=details.use_localhost_alias)
     logger.debug("[test-connection] Using resolved host: %s", resolved_host)
 
-    cs = (
-        f"DRIVER={{{details.odbc_driver}}};"
-        f"SERVER={resolved_host},{details.db_port};"
-        f"DATABASE={details.db_name};"
-        f"UID={details.db_user};"
-        f"PWD={details.db_password}"
-        + (";Encrypt=yes;TrustServerCertificate=yes" if "18" in details.odbc_driver else "")
-    )
     try:
-        conn = pyodbc.connect(cs, timeout=5)
-        conn.close()
+        if details.db_type == "postgres":
+            conn = psycopg2.connect(
+                host=resolved_host,
+                port=details.db_port,
+                user=details.db_user,
+                password=details.db_password,
+                dbname=details.db_name,
+                connect_timeout=5,
+            )
+            conn.close()
+        else:
+            cs = (
+                f"DRIVER={{{details.odbc_driver}}};"
+                f"SERVER={resolved_host},{details.db_port};"
+                f"DATABASE={details.db_name};"
+                f"UID={details.db_user};"
+                f"PWD={details.db_password}"
+                + (";Encrypt=yes;TrustServerCertificate=yes" if "18" in details.odbc_driver else "")
+            )
+            conn = pyodbc.connect(cs, timeout=5)
+            conn.close()
         return {"status": "success", "message": "Connection OK"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/create-postgres-db")
+async def create_postgres_db(req: PgCreateDbRequest):
+    """
+    PostgreSQL create-new-database path.
+
+    Connects with superuser credentials, creates the target database and a
+    restricted application user, then returns the app-user credentials so the
+    caller can proceed with the normal setup flow.  Superuser credentials are
+    NOT persisted anywhere after this request completes.
+    """
+    resolved_host = resolve_hostname(req.db_host, use_localhost_alias=req.use_localhost_alias)
+    logger.debug("[create-postgres-db] Using resolved host: %s", resolved_host)
+
+    try:
+        # Connect to the default 'postgres' maintenance DB as superuser.
+        su_conn = psycopg2.connect(
+            host=resolved_host,
+            port=req.db_port,
+            user=req.superuser,
+            password=req.superuser_password,
+            dbname="postgres",
+            connect_timeout=5,
+        )
+        su_conn.autocommit = True
+        cur = su_conn.cursor()
+
+        # Create the database (skip if it already exists).
+        cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (req.new_db_name,))
+        if not cur.fetchone():
+            cur.execute(f'CREATE DATABASE "{req.new_db_name}"')
+
+        # Create the app user (skip if it already exists).
+        cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (req.app_user,))
+        if not cur.fetchone():
+            cur.execute(
+                f'CREATE USER "{req.app_user}" WITH PASSWORD %s',
+                (req.app_user_password,),
+            )
+
+        # Grant connect + schema-level privileges on the new database.
+        cur.execute(f'GRANT CONNECT ON DATABASE "{req.new_db_name}" TO "{req.app_user}"')
+        cur.close()
+        su_conn.close()
+
+        # Connect to the new database to grant schema and future object privileges.
+        db_conn = psycopg2.connect(
+            host=resolved_host,
+            port=req.db_port,
+            user=req.superuser,
+            password=req.superuser_password,
+            dbname=req.new_db_name,
+            connect_timeout=5,
+        )
+        db_conn.autocommit = True
+        cur2 = db_conn.cursor()
+        schema = req.db_schema
+        cur2.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
+        cur2.execute(f'GRANT USAGE ON SCHEMA "{schema}" TO "{req.app_user}"')
+        cur2.execute(
+            f'ALTER DEFAULT PRIVILEGES IN SCHEMA "{schema}" '
+            f'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "{req.app_user}"'
+        )
+        cur2.execute(
+            f'ALTER DEFAULT PRIVILEGES IN SCHEMA "{schema}" GRANT USAGE, SELECT ON SEQUENCES TO "{req.app_user}"'
+        )
+        cur2.close()
+        db_conn.close()
+    except psycopg2.Error as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return {
+        "status": "success",
+        "message": f"Database '{req.new_db_name}' created with user '{req.app_user}'.",
+        "connection": {
+            "db_type": "postgres",
+            "db_host": req.db_host,
+            "db_port": req.db_port,
+            "db_name": req.new_db_name,
+            "db_user": req.app_user,
+            "schema": req.db_schema,
+            "use_localhost_alias": req.use_localhost_alias,
+        },
+    }
 
 
 @router.post("")

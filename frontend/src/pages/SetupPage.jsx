@@ -68,19 +68,65 @@ function Feedback({ message, type }) {
 // Step 1 — Database connection
 // ---------------------------------------------------------------------------
 
-function StepConnection({ onSaved, initial }) {
-  const [form, setForm] = useState(
-    initial ?? {
-      host: '',
-      useLocalhostAlias: false,
-      port: '1433',
-      user: '',
+const DEFAULT_MSSQL_FORM = {
+  dbType: 'mssql',
+  host: '',
+  useLocalhostAlias: false,
+  port: '1433',
+  user: '',
+  password: '',
+  database: '',
+  schema: 'adm',
+  driver: ODBC_DRIVERS[0],
+};
+
+const DEFAULT_PG_FORM = {
+  dbType: 'postgres',
+  pgMode: 'existing', // 'existing' | 'create'
+  host: '',
+  useLocalhostAlias: false,
+  port: '5432',
+  user: '',
+  password: '',
+  database: '',
+  schema: 'adm',
+  // create-new fields
+  superuser: '',
+  superuserPassword: '',
+  newDatabase: '',
+  appUser: 'adminit_app',
+  appUserPassword: '',
+};
+
+function initialFormFromConnection(conn) {
+  if (!conn) return DEFAULT_MSSQL_FORM;
+  if (conn.db_type === 'postgres') {
+    return {
+      ...DEFAULT_PG_FORM,
+      host: conn.db_host ?? '',
+      useLocalhostAlias: conn.use_localhost_alias ?? false,
+      port: String(conn.db_port ?? 5432),
+      user: conn.db_user ?? '',
       password: '',
-      database: '',
-      schema: 'adm',
-      driver: ODBC_DRIVERS[0],
-    }
-  );
+      database: conn.db_name ?? '',
+      schema: conn.schema ?? 'adm',
+    };
+  }
+  return {
+    ...DEFAULT_MSSQL_FORM,
+    host: conn.db_host ?? '',
+    useLocalhostAlias: conn.use_localhost_alias ?? false,
+    port: String(conn.db_port ?? 1433),
+    user: conn.db_user ?? '',
+    password: '',
+    database: conn.db_name ?? '',
+    schema: conn.schema ?? 'adm',
+    driver: conn.odbc_driver ?? ODBC_DRIVERS[0],
+  };
+}
+
+function StepConnection({ onSaved, initial }) {
+  const [form, setForm] = useState(initial ?? DEFAULT_MSSQL_FORM);
   const [availableDatabases, setAvailableDatabases] = useState([]);
   const [feedback, setFeedback] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -91,15 +137,59 @@ function StepConnection({ onSaved, initial }) {
     setFeedback(null);
   }
 
-  function buildPayload() {
-    return {
+  function handleDbTypeChange(newType) {
+    setFeedback(null);
+    setAvailableDatabases([]);
+    if (newType === 'postgres') {
+      setForm({ ...DEFAULT_PG_FORM });
+    } else {
+      setForm({ ...DEFAULT_MSSQL_FORM });
+    }
+  }
+
+  function buildTestPayload() {
+    const base = {
+      db_type: form.dbType,
       db_host: form.host,
-      db_port: parseInt(form.port, 10) || 1433,
+      db_port: parseInt(form.port, 10) || (form.dbType === 'postgres' ? 5432 : 1433),
       db_user: form.user,
       db_password: form.password,
       db_name: form.database,
       schema: form.schema,
-      odbc_driver: form.driver,
+      use_localhost_alias: form.useLocalhostAlias,
+    };
+    if (form.dbType === 'mssql') {
+      base.odbc_driver = form.driver;
+    }
+    return base;
+  }
+
+  function buildSavePayload() {
+    return buildTestPayload();
+  }
+
+  function buildCreateDbPayload() {
+    return {
+      db_host: form.host,
+      db_port: parseInt(form.port, 10) || 5432,
+      superuser: form.superuser,
+      superuser_password: form.superuserPassword,
+      new_db_name: form.newDatabase,
+      app_user: form.appUser,
+      app_user_password: form.appUserPassword,
+      schema: form.schema,
+      use_localhost_alias: form.useLocalhostAlias,
+    };
+  }
+
+  function buildDiscoverPayload() {
+    return {
+      db_type: form.dbType,
+      host: form.host,
+      port: parseInt(form.port, 10) || (form.dbType === 'postgres' ? 5432 : 1433),
+      user: form.user,
+      password: form.password,
+      driver: form.driver ?? ODBC_DRIVERS[0],
       use_localhost_alias: form.useLocalhostAlias,
     };
   }
@@ -111,14 +201,7 @@ function StepConnection({ onSaved, initial }) {
       const res = await fetch('/api/discover/databases', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          host: form.host,
-          port: parseInt(form.port, 10) || 1433,
-          user: form.user,
-          password: form.password,
-          driver: form.driver,
-          use_localhost_alias: form.useLocalhostAlias,
-        }),
+        body: JSON.stringify(buildDiscoverPayload()),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.detail ?? 'Failed to list databases.');
@@ -140,7 +223,7 @@ function StepConnection({ onSaved, initial }) {
       const res = await fetch('/api/setup/test-connection', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildPayload()),
+        body: JSON.stringify(buildTestPayload()),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.detail ?? body.message ?? 'Connection failed.');
@@ -152,14 +235,14 @@ function StepConnection({ onSaved, initial }) {
     }
   }
 
-  async function handleSave() {
+  async function handleSaveExisting() {
     setLoading(true);
     setFeedback(null);
     try {
       const res = await fetch('/api/setup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildPayload()),
+        body: JSON.stringify(buildSavePayload()),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.detail ?? body.message ?? 'Save failed.');
@@ -171,10 +254,109 @@ function StepConnection({ onSaved, initial }) {
     }
   }
 
+  async function handleCreateAndSave() {
+    setLoading(true);
+    setFeedback(null);
+    try {
+      // Step 1: create the database and app user.
+      const createRes = await fetch('/api/setup/create-postgres-db', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildCreateDbPayload()),
+      });
+      const createBody = await createRes.json();
+      if (!createRes.ok) throw new Error(createBody.detail ?? 'Failed to create database.');
+
+      // Step 2: save the app-user connection as the core config.
+      const connDetails = {
+        db_type: 'postgres',
+        db_host: form.host,
+        db_port: parseInt(form.port, 10) || 5432,
+        db_user: form.appUser,
+        db_password: form.appUserPassword,
+        db_name: form.newDatabase,
+        schema: form.schema,
+        use_localhost_alias: form.useLocalhostAlias,
+      };
+      const saveRes = await fetch('/api/setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(connDetails),
+      });
+      const saveBody = await saveRes.json();
+      if (!saveRes.ok) throw new Error(saveBody.detail ?? saveBody.message ?? 'Save failed.');
+      onSaved(saveBody.connection);
+    } catch (e) {
+      setFeedback({ type: 'error', message: e.message });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const isPostgres = form.dbType === 'postgres';
+  const isCreateMode = isPostgres && form.pgMode === 'create';
+
   return (
     <div className="space-y-5">
+      {/* Database type selector */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-2">Database type</label>
+        <div className="flex gap-3">
+          {[
+            { value: 'mssql', label: 'SQL Server' },
+            { value: 'postgres', label: 'PostgreSQL' },
+          ].map(({ value, label }) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => handleDbTypeChange(value)}
+              className={`flex-1 rounded-md border px-4 py-2.5 text-sm font-medium transition-colors ${
+                form.dbType === value
+                  ? 'border-brand-600 bg-brand-50 text-brand-700'
+                  : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* PostgreSQL mode selector (existing vs create new) */}
+      {isPostgres && (
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Setup mode</label>
+          <div className="flex gap-3">
+            {[
+              { value: 'existing', label: 'Connect to existing database' },
+              { value: 'create', label: 'Create new database' },
+            ].map(({ value, label }) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => set('pgMode', value)}
+                className={`flex-1 rounded-md border px-4 py-2.5 text-sm font-medium transition-colors ${
+                  form.pgMode === value
+                    ? 'border-brand-600 bg-brand-50 text-brand-700'
+                    : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {isCreateMode && (
+            <p className="mt-2 text-xs text-gray-400">
+              AdminIT will create the database and a restricted app user. Superuser credentials are
+              not stored after setup completes.
+            </p>
+          )}
+        </div>
+      )}
+
       <Feedback message={feedback?.message} type={feedback?.type} />
 
+      {/* Host / Port */}
       <div className="grid grid-cols-2 gap-4">
         <div className="col-span-2 sm:col-span-1">
           <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -185,7 +367,9 @@ function StepConnection({ onSaved, initial }) {
             required
             value={form.host}
             onChange={(e) => set('host', e.target.value)}
-            placeholder="e.g. 192.168.1.10 or sqlserver"
+            placeholder={
+              isPostgres ? 'e.g. 192.168.1.10 or pg-host' : 'e.g. 192.168.1.10 or sqlserver'
+            }
             autoFocus
           />
         </div>
@@ -204,6 +388,7 @@ function StepConnection({ onSaved, initial }) {
         </div>
       </div>
 
+      {/* Docker localhost alias */}
       <div>
         <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
           <input
@@ -218,100 +403,213 @@ function StepConnection({ onSaved, initial }) {
           </span>
         </label>
         <p className="mt-1 text-xs text-gray-400 ml-6">
-          Enable this when SQL Server is running in Docker and accessible via the host alias.
+          Enable this when the database is running in Docker and accessible via the host alias.
         </p>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Username <span className="text-danger-600">*</span>
-          </label>
-          <Input
-            type="text"
-            required
-            value={form.user}
-            onChange={(e) => set('user', e.target.value)}
-            placeholder="SQL login"
-            autoComplete="username"
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Password <span className="text-danger-600">*</span>
-          </label>
-          <Input
-            type="password"
-            required
-            value={form.password}
-            onChange={(e) => set('password', e.target.value)}
-            autoComplete="current-password"
-          />
-        </div>
-      </div>
+      {/* Existing-DB credentials (both modes show these, but create-mode uses them as superuser) */}
+      {isCreateMode ? (
+        /* Create-new mode: superuser credentials + new database details */
+        <>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Superuser <span className="text-danger-600">*</span>
+              </label>
+              <Input
+                type="text"
+                required
+                value={form.superuser}
+                onChange={(e) => set('superuser', e.target.value)}
+                placeholder="postgres"
+                autoComplete="username"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Superuser password <span className="text-danger-600">*</span>
+              </label>
+              <Input
+                type="password"
+                required
+                value={form.superuserPassword}
+                onChange={(e) => set('superuserPassword', e.target.value)}
+                autoComplete="current-password"
+              />
+            </div>
+          </div>
 
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          Database <span className="text-danger-600">*</span>
-        </label>
-        <div className="flex gap-2">
-          <Input
-            type="text"
-            required
-            value={form.database}
-            onChange={(e) => set('database', e.target.value)}
-            placeholder="Type a name or use Discover"
-            list="db-list"
-            className="flex-1"
-          />
-          <datalist id="db-list">
-            {availableDatabases.map((db) => (
-              <option key={db} value={db} />
-            ))}
-          </datalist>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={handleDiscover}
-            disabled={discovering || loading}
-          >
-            {discovering ? <Spinner className="w-4 h-4" /> : 'Discover'}
-          </Button>
-        </div>
-        <p className="mt-1 text-xs text-gray-400">
-          Type the database name directly, or fill in host and credentials then click Discover to
-          pick from available databases.
-        </p>
-      </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                New database name <span className="text-danger-600">*</span>
+              </label>
+              <Input
+                type="text"
+                required
+                value={form.newDatabase}
+                onChange={(e) => set('newDatabase', e.target.value)}
+                placeholder="adminit"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Schema name</label>
+              <Input
+                type="text"
+                value={form.schema}
+                onChange={(e) => set('schema', e.target.value)}
+              />
+              <p className="mt-1 text-xs text-gray-400">
+                Default: <code className="bg-gray-100 px-1 rounded">adm</code>
+              </p>
+            </div>
+          </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Schema name</label>
-          <Input type="text" value={form.schema} onChange={(e) => set('schema', e.target.value)} />
-          <p className="mt-1 text-xs text-gray-400">
-            The SQL schema where AdminIT tables are deployed. Default:{' '}
-            <code className="bg-gray-100 px-1 rounded">adm</code>
-          </p>
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">ODBC driver</label>
-          <Select value={form.driver} onChange={(e) => set('driver', e.target.value)}>
-            {ODBC_DRIVERS.map((d) => (
-              <option key={d} value={d}>
-                {d}
-              </option>
-            ))}
-          </Select>
-        </div>
-      </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                App username <span className="text-danger-600">*</span>
+              </label>
+              <Input
+                type="text"
+                required
+                value={form.appUser}
+                onChange={(e) => set('appUser', e.target.value)}
+                placeholder="adminit_app"
+              />
+              <p className="mt-1 text-xs text-gray-400">
+                A restricted database user created for AdminIT.
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                App user password <span className="text-danger-600">*</span>
+              </label>
+              <Input
+                type="password"
+                required
+                value={form.appUserPassword}
+                onChange={(e) => set('appUserPassword', e.target.value)}
+                autoComplete="new-password"
+              />
+            </div>
+          </div>
+        </>
+      ) : (
+        /* Existing-DB mode: normal credentials */
+        <>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Username <span className="text-danger-600">*</span>
+              </label>
+              <Input
+                type="text"
+                required
+                value={form.user}
+                onChange={(e) => set('user', e.target.value)}
+                placeholder={isPostgres ? 'Database user' : 'SQL login'}
+                autoComplete="username"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Password <span className="text-danger-600">*</span>
+              </label>
+              <Input
+                type="password"
+                required
+                value={form.password}
+                onChange={(e) => set('password', e.target.value)}
+                autoComplete="current-password"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Database <span className="text-danger-600">*</span>
+            </label>
+            <div className="flex gap-2">
+              <Input
+                type="text"
+                required
+                value={form.database}
+                onChange={(e) => set('database', e.target.value)}
+                placeholder="Type a name or use Discover"
+                list="db-list"
+                className="flex-1"
+              />
+              <datalist id="db-list">
+                {availableDatabases.map((db) => (
+                  <option key={db} value={db} />
+                ))}
+              </datalist>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={handleDiscover}
+                disabled={discovering || loading}
+              >
+                {discovering ? <Spinner className="w-4 h-4" /> : 'Discover'}
+              </Button>
+            </div>
+            <p className="mt-1 text-xs text-gray-400">
+              Type the database name directly, or fill in host and credentials then click Discover.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Schema name</label>
+              <Input
+                type="text"
+                value={form.schema}
+                onChange={(e) => set('schema', e.target.value)}
+              />
+              <p className="mt-1 text-xs text-gray-400">
+                The SQL schema where AdminIT tables are deployed. Default:{' '}
+                <code className="bg-gray-100 px-1 rounded">adm</code>
+              </p>
+            </div>
+            {!isPostgres && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">ODBC driver</label>
+                <Select value={form.driver} onChange={(e) => set('driver', e.target.value)}>
+                  {ODBC_DRIVERS.map((d) => (
+                    <option key={d} value={d}>
+                      {d}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            )}
+          </div>
+        </>
+      )}
 
       <div className="flex items-center justify-end gap-3 pt-2">
-        <Button type="button" variant="secondary" onClick={handleTest} disabled={loading}>
-          {loading ? <Spinner className="w-4 h-4" /> : 'Test connection'}
-        </Button>
-        <Button type="button" onClick={handleSave} disabled={loading}>
-          Save &amp; continue
+        {!isCreateMode && (
+          <Button type="button" variant="secondary" onClick={handleTest} disabled={loading}>
+            {loading ? <Spinner className="w-4 h-4" /> : 'Test connection'}
+          </Button>
+        )}
+        <Button
+          type="button"
+          onClick={isCreateMode ? handleCreateAndSave : handleSaveExisting}
+          disabled={loading}
+        >
+          {loading ? (
+            <span className="flex items-center gap-2">
+              <Spinner className="w-4 h-4" />
+              {isCreateMode ? 'Creating…' : 'Saving…'}
+            </span>
+          ) : isCreateMode ? (
+            'Create database & continue'
+          ) : (
+            'Save & continue'
+          )}
         </Button>
       </div>
     </div>
@@ -638,20 +936,7 @@ export default function SetupPage() {
               {step === 1 && (
                 <StepConnection
                   onSaved={handleConnectionSaved}
-                  initial={
-                    savedConnection
-                      ? {
-                          host: savedConnection.db_host,
-                          useLocalhostAlias: savedConnection.use_localhost_alias ?? false,
-                          port: String(savedConnection.db_port),
-                          user: savedConnection.db_user,
-                          password: '',
-                          database: savedConnection.db_name,
-                          schema: savedConnection.schema,
-                          driver: savedConnection.odbc_driver,
-                        }
-                      : null
-                  }
+                  initial={initialFormFromConnection(savedConnection)}
                 />
               )}
               {step === 2 && <StepDeploy onDeployed={handleDeployed} />}
