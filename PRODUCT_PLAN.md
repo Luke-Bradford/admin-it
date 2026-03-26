@@ -338,7 +338,7 @@ This gives the same query interface as the SQL Server audit log — the audit UI
 
 ---
 
-#### #79 — Detect existing install — connect-only mode
+#### #79 — Detect existing install — connect-only mode ✅ done
 **Size:** S
 **Persona:** System admin
 **Problem:** The setup wizard currently assumes a fresh install and always attempts to deploy the schema. If admin-it has already been installed on this database server — or if the admin-it schema objects already exist from a previous install — the wizard will either fail or overwrite existing data.
@@ -507,7 +507,6 @@ This gives the same query interface as the SQL Server audit log — the audit UI
 
 ## Immediate next actions (in order)
 
-Phase 1 hardening is complete. Phase 2 (connection and user management) is done. Phase 1.5 (frontend overhaul) is done. Phase 2.5 setup wizard multi-database support is done (#75, #76, #77, #78 done). Remaining work in priority order:
+Phase 1 hardening is complete. Phase 2 (connection and user management) is done. Phase 1.5 (frontend overhaul) is done. Phase 2.5 setup wizard multi-database support is done (#75, #76, #77, #78, #79 done). Remaining work in priority order:
 
-1. **#79 — Detect existing install — connect-only mode**
-2. Then Phase 3 (data browser) — the core end-user value
+1. **Phase 3 (data browser)** — the core end-user value — start with #12 (table browser)
