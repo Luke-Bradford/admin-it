@@ -179,6 +179,8 @@ function StepConnection({ onSaved, initial }) {
     };
   }
 
+  // Only called from the Discover button, which is only rendered in !isCreateMode.
+  // form.user / form.password are therefore always populated when this runs.
   function buildDiscoverPayload() {
     const payload = {
       db_type: form.dbType,
