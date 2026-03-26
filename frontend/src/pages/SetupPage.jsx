@@ -690,11 +690,15 @@ function StepDeploy({ onDeployed, onConnectExisting }) {
     setFeedback(null);
     try {
       const res = await fetch('/api/setup/admin-status');
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail ?? 'Failed to check admin status.');
+      }
       const body = await res.json();
-      if (!res.ok) throw new Error(body.detail ?? 'Failed to check admin status.');
       onConnectExisting(body.present === true);
     } catch (e) {
       setFeedback({ type: 'error', message: e.message });
+    } finally {
       setLoading(false);
     }
   }
@@ -738,7 +742,17 @@ function StepDeploy({ onDeployed, onConnectExisting }) {
               <Button
                 type="button"
                 variant="secondary"
-                onClick={() => setRedeployMode('confirm')}
+                onClick={() => {
+                  if (!localStorage.getItem('token')) {
+                    setFeedback({
+                      type: 'error',
+                      message: 'You must be signed in as a SystemAdmin to re-deploy the schema.',
+                    });
+                    return;
+                  }
+                  setFeedback(null);
+                  setRedeployMode('confirm');
+                }}
                 disabled={loading}
               >
                 Re-deploy schema
