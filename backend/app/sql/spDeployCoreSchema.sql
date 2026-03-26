@@ -185,7 +185,7 @@ END
 -----------------------------------------
 SET @sql += '
 IF EXISTS (SELECT 1 FROM sys.triggers WHERE name = ''trg_audit_Users''
-           AND parent_id = OBJECT_ID(''' + @SchemaName + '.Users''))
+           AND parent_id = OBJECT_ID(''[' + @SchemaName + '].[Users]''))
     DROP TRIGGER [' + @SchemaName + '].[trg_audit_Users];
 ';
 SET @sql += '
@@ -215,7 +215,7 @@ END
 
 SET @sql += '
 IF EXISTS (SELECT 1 FROM sys.triggers WHERE name = ''trg_audit_Connections''
-           AND parent_id = OBJECT_ID(''' + @SchemaName + '.Connections''))
+           AND parent_id = OBJECT_ID(''[' + @SchemaName + '].[Connections]''))
     DROP TRIGGER [' + @SchemaName + '].[trg_audit_Connections];
 ';
 SET @sql += '
@@ -245,7 +245,7 @@ END
 
 SET @sql += '
 IF EXISTS (SELECT 1 FROM sys.triggers WHERE name = ''trg_audit_ConnectionPermissions''
-           AND parent_id = OBJECT_ID(''' + @SchemaName + '.ConnectionPermissions''))
+           AND parent_id = OBJECT_ID(''[' + @SchemaName + '].[ConnectionPermissions]''))
     DROP TRIGGER [' + @SchemaName + '].[trg_audit_ConnectionPermissions];
 ';
 SET @sql += '
@@ -275,7 +275,7 @@ END
 
 SET @sql += '
 IF EXISTS (SELECT 1 FROM sys.triggers WHERE name = ''trg_audit_Secrets''
-           AND parent_id = OBJECT_ID(''' + @SchemaName + '.Secrets''))
+           AND parent_id = OBJECT_ID(''[' + @SchemaName + '].[Secrets]''))
     DROP TRIGGER [' + @SchemaName + '].[trg_audit_Secrets];
 ';
 SET @sql += '
@@ -295,8 +295,9 @@ BEGIN
 
     DECLARE @uid UNIQUEIDENTIFIER = TRY_CAST(CAST(SESSION_CONTEXT(N''app_user_id'') AS NVARCHAR(36)) AS UNIQUEIDENTIFIER);
     DECLARE @rid UNIQUEIDENTIFIER = CASE @action WHEN ''DELETE'' THEN (SELECT TOP 1 SecretId FROM deleted) ELSE (SELECT TOP 1 SecretId FROM inserted) END;
-    DECLARE @old NVARCHAR(MAX) = CASE WHEN @action IN (''UPDATE'', ''DELETE'') THEN (SELECT * FROM deleted FOR JSON AUTO) ELSE NULL END;
-    DECLARE @new NVARCHAR(MAX) = CASE WHEN @action IN (''INSERT'', ''UPDATE'') THEN (SELECT * FROM inserted FOR JSON AUTO) ELSE NULL END;
+    -- SecretValue is intentionally excluded to prevent plaintext secrets appearing in the audit log.
+    DECLARE @old NVARCHAR(MAX) = CASE WHEN @action IN (''UPDATE'', ''DELETE'') THEN (SELECT SecretId, SecretType, SecretDescription, CreatedById, CreatedDate, ModifiedById, ModifiedDate FROM deleted FOR JSON AUTO) ELSE NULL END;
+    DECLARE @new NVARCHAR(MAX) = CASE WHEN @action IN (''INSERT'', ''UPDATE'') THEN (SELECT SecretId, SecretType, SecretDescription, CreatedById, CreatedDate, ModifiedById, ModifiedDate FROM inserted FOR JSON AUTO) ELSE NULL END;
 
     INSERT INTO [' + @SchemaName + '].[audit_log] (table_name, record_id, action, changed_by, old_data, new_data)
     VALUES (''Secrets'', @rid, @action, @uid, @old, @new);

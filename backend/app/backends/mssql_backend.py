@@ -30,6 +30,20 @@ logger = logging.getLogger(__name__)
 _current_user_id: ContextVar[str | None] = ContextVar("mssql_current_user_id", default=None)
 
 
+def _set_mssql_session_user(conn) -> None:
+    """SQLAlchemy 'begin' event handler.  Sets SESSION_CONTEXT(N'app_user_id') to the
+    current request's user UUID so SQL Server audit triggers can record who made each change.
+
+    sp_set_session_context @read_only=0 allows overwriting within the same pooled connection.
+    Passing NULL clears any previously set value for unauthenticated requests.
+    """
+    uid = _current_user_id.get()
+    conn.execute(
+        text("EXEC sp_set_session_context N'app_user_id', :uid, @read_only=0"),
+        {"uid": uid},
+    )
+
+
 def set_current_user(uid: str | None) -> "Token[str | None]":
     """Set the per-request user ID for the SQL Server audit trigger.
 
@@ -58,17 +72,13 @@ class MSSQLBackend:
 
         SESSION_CONTEXT is connection-scoped on SQL Server, so we explicitly clear it
         at connection checkout (begin) rather than relying on pool cleanup.
-        """
 
-        @event.listens_for(self._engine, "begin")
-        def _set_session_user(conn) -> None:
-            uid = _current_user_id.get()
-            # sp_set_session_context @read_only=0 allows overwrite within the same connection.
-            # Passing NULL clears any previously set value when no user is authenticated.
-            conn.execute(
-                text("EXEC sp_set_session_context N'app_user_id', :uid, @read_only=0"),
-                {"uid": uid},
-            )
+        The listener is registered only once per engine instance; subsequent calls
+        (e.g. from a second MSSQLBackend wrapping the same engine) are no-ops.
+        """
+        if event.contains(self._engine, "begin", _set_mssql_session_user):
+            return
+        event.listen(self._engine, "begin", _set_mssql_session_user)
 
     def get_engine(self) -> Engine:
         return self._engine
@@ -114,16 +124,17 @@ class MSSQLBackend:
             ).fetchall()
         return [
             {
-                "id": str(r._mapping["id"]),
-                "table_name": r._mapping["table_name"],
-                "record_id": str(r._mapping["record_id"]) if r._mapping["record_id"] else None,
-                "action": r._mapping["action"],
-                "changed_by": str(r._mapping["changed_by"]) if r._mapping["changed_by"] else None,
-                "changed_at": r._mapping["changed_at"].isoformat() if r._mapping["changed_at"] else None,
-                "old_data": _parse_json(r._mapping["old_data"]),
-                "new_data": _parse_json(r._mapping["new_data"]),
+                "id": str(m["id"]),
+                "table_name": m["table_name"],
+                "record_id": str(m["record_id"]) if m["record_id"] else None,
+                "action": m["action"],
+                "changed_by": str(m["changed_by"]) if m["changed_by"] else None,
+                "changed_at": m["changed_at"].isoformat() if m["changed_at"] else None,
+                "old_data": _parse_json(m["old_data"]),
+                "new_data": _parse_json(m["new_data"]),
             }
             for r in rows
+            for m in (r._mapping,)
         ]
 
 
