@@ -633,22 +633,69 @@ function StepConnection({ onSaved, initial }) {
 }
 
 // ---------------------------------------------------------------------------
-// Step 2 — Schema deployment
+// Step 2 — Schema deployment (with existing-install detection)
 // ---------------------------------------------------------------------------
 
-function StepDeploy({ onDeployed }) {
+function StepDeploy({ onDeployed, onConnectExisting }) {
+  // null = checking, true = already deployed, false = not deployed
+  const [existingInstall, setExistingInstall] = useState(null);
+  // 'idle' | 'confirm' — confirm state shows the re-deploy warning
+  const [redeployMode, setRedeployMode] = useState('idle');
   const [feedback, setFeedback] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  async function handleDeploy() {
+  // On mount, detect whether the schema is already deployed.
+  useEffect(() => {
+    async function detect() {
+      try {
+        const res = await fetch('/api/setup/deploy-status');
+        if (!res.ok) throw new Error('Detection failed');
+        const body = await res.json();
+        setExistingInstall(body.deployed === true);
+      } catch {
+        // If detection fails, fall through to normal deploy flow.
+        setExistingInstall(false);
+      }
+    }
+    detect();
+  }, []);
+
+  async function handleDeploy(force = false) {
     setLoading(true);
     setFeedback(null);
     try {
-      const res = await fetch('/api/setup/deploy-schema', { method: 'POST' });
+      const headers = { 'Content-Type': 'application/json' };
+      if (force) {
+        // force=true requires a SystemAdmin JWT — include it from localStorage.
+        const token = localStorage.getItem('token');
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+      }
+      const url = force ? '/api/setup/deploy-schema?force=true' : '/api/setup/deploy-schema';
+      const res = await fetch(url, { method: 'POST', headers });
       const body = await res.json();
       if (!res.ok) throw new Error(body.detail ?? 'Deployment failed.');
       setFeedback({ type: 'success', message: body.message ?? 'Schema deployed successfully.' });
       onDeployed();
+    } catch (e) {
+      setFeedback({ type: 'error', message: e.message });
+      // Reset confirmation state so the UI returns to the detection banner.
+      setRedeployMode('idle');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleConnectExisting() {
+    setLoading(true);
+    setFeedback(null);
+    try {
+      const res = await fetch('/api/setup/admin-status');
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail ?? 'Failed to check admin status.');
+      }
+      const body = await res.json();
+      onConnectExisting(body.present === true);
     } catch (e) {
       setFeedback({ type: 'error', message: e.message });
     } finally {
@@ -656,6 +703,102 @@ function StepDeploy({ onDeployed }) {
     }
   }
 
+  // Still checking deploy status
+  if (existingInstall === null) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <Spinner className="w-6 h-6" />
+      </div>
+    );
+  }
+
+  // Existing install detected
+  if (existingInstall) {
+    return (
+      <div className="space-y-5">
+        <div className="rounded-md border border-warning-200 bg-warning-50 px-4 py-3">
+          <p className="text-sm font-medium text-warning-800">Existing install detected</p>
+          <p className="mt-1 text-sm text-warning-700">
+            AdminIT schema objects were found in this database. You can connect to the existing
+            install, or re-deploy the schema (for disaster recovery only).
+          </p>
+        </div>
+
+        <Feedback message={feedback?.message} type={feedback?.type} />
+
+        {redeployMode === 'confirm' && (
+          <div className="rounded-md border border-danger-200 bg-danger-50 px-4 py-3">
+            <p className="text-sm font-medium text-danger-800">Warning — re-deployment</p>
+            <p className="mt-1 text-sm text-danger-700">
+              Re-deploying the schema may affect existing data. Only proceed if you are recovering
+              from a corrupted or incomplete install.
+            </p>
+          </div>
+        )}
+
+        <div className="flex items-center justify-between gap-3 pt-2">
+          <div className="flex gap-2">
+            {redeployMode === 'idle' ? (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  if (!localStorage.getItem('token')) {
+                    setFeedback({
+                      type: 'error',
+                      message: 'You must be signed in as a SystemAdmin to re-deploy the schema.',
+                    });
+                    return;
+                  }
+                  setFeedback(null);
+                  setRedeployMode('confirm');
+                }}
+                disabled={loading}
+              >
+                Re-deploy schema
+              </Button>
+            ) : (
+              <>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setRedeployMode('idle')}
+                  disabled={loading}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  variant="danger"
+                  onClick={() => handleDeploy(true)}
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <span className="flex items-center gap-2">
+                      <Spinner className="w-4 h-4" /> Deploying…
+                    </span>
+                  ) : (
+                    'Confirm re-deploy'
+                  )}
+                </Button>
+              </>
+            )}
+          </div>
+          <Button type="button" onClick={handleConnectExisting} disabled={loading}>
+            {loading ? (
+              <span className="flex items-center gap-2">
+                <Spinner className="w-4 h-4" /> Connecting…
+              </span>
+            ) : (
+              'Connect to existing install'
+            )}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // Fresh install — normal deploy flow
   return (
     <div className="space-y-5">
       <p className="text-sm text-gray-600">
@@ -667,7 +810,7 @@ function StepDeploy({ onDeployed }) {
       <Feedback message={feedback?.message} type={feedback?.type} />
 
       <div className="flex justify-end pt-2">
-        <Button type="button" onClick={handleDeploy} disabled={loading}>
+        <Button type="button" onClick={() => handleDeploy(false)} disabled={loading}>
           {loading ? (
             <span className="flex items-center gap-2">
               <Spinner className="w-4 h-4" /> Deploying…
@@ -892,6 +1035,16 @@ export default function SetupPage() {
     setStep(3);
   }
 
+  // Called by StepDeploy when the user chooses "Connect to existing install".
+  // hasAdmin: whether a SystemAdmin user already exists in the detected schema.
+  function handleConnectExisting(hasAdmin) {
+    if (hasAdmin) {
+      setStep(COMPLETE_STEP);
+    } else {
+      setStep(3);
+    }
+  }
+
   function handleAdminCreated() {
     setStep(COMPLETE_STEP);
   }
@@ -955,7 +1108,9 @@ export default function SetupPage() {
                   initial={initialFormFromConnection(savedConnection)}
                 />
               )}
-              {step === 2 && <StepDeploy onDeployed={handleDeployed} />}
+              {step === 2 && (
+                <StepDeploy onDeployed={handleDeployed} onConnectExisting={handleConnectExisting} />
+              )}
               {step === 3 && <StepCreateAdmin onCreated={handleAdminCreated} />}
             </div>
           </>
