@@ -269,6 +269,10 @@ function StepConnection({ onSaved, initial }) {
       setFeedback({ type: 'error', message: 'New database name is required.' });
       return;
     }
+    if (!form.appUser) {
+      setFeedback({ type: 'error', message: 'App username is required.' });
+      return;
+    }
     if (!form.appUserPassword) {
       setFeedback({ type: 'error', message: 'App user password is required.' });
       return;
