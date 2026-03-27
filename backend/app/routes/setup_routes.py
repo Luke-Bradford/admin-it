@@ -158,8 +158,6 @@ _MSSQL_ODBC_DRIVER_PREFERENCE = ["ODBC Driver 18 for SQL Server", "ODBC Driver 1
 def _best_odbc_driver() -> str:
     """Return the best available SQL Server ODBC driver installed on this system.
     Prefers Driver 18 over 17.  Raises RuntimeError if neither is found."""
-    import pyodbc  # noqa: PLC0415
-
     installed = set(pyodbc.drivers())
     for driver in _MSSQL_ODBC_DRIVER_PREFERENCE:
         if driver in installed:
@@ -413,12 +411,14 @@ async def test_connection(details: ConnDetails):
             encrypt_clause = (
                 ";Encrypt=yes;TrustServerCertificate=yes" if driver == "ODBC Driver 18 for SQL Server" else ""
             )
+            uid = details.db_user.replace("}", "}}")
+            pwd = details.db_password.replace("}", "}}")
             cs = (
                 f"DRIVER={{{driver}}};"
                 f"SERVER={resolved_host},{details.db_port};"
                 f"DATABASE={details.db_name};"
-                f"UID={details.db_user};"
-                f"PWD={details.db_password}" + encrypt_clause
+                f"UID={{{uid}}};"
+                f"PWD={{{pwd}}}" + encrypt_clause
             )
             with pyodbc.connect(cs, timeout=5):
                 pass
@@ -556,6 +556,9 @@ async def setup(
     raw = details.model_dump(by_alias=True)
     # For MSSQL, store the auto-detected driver rather than whatever the client sent.
     # This ensures the saved config always uses the best available driver on this server.
+    # Note: _best_odbc_driver() is also called inside test_connection above.  The calls
+    # are redundant but _best_odbc_driver() is deterministic and cheap (pyodbc.drivers()
+    # reads the ODBC manager registry/ini once), so the duplication is acceptable.
     if details.db_type == "mssql":
         raw["odbc_driver"] = _best_odbc_driver()
     save_core_config(raw)
