@@ -150,10 +150,23 @@ class PgCreateDbRequest(BaseModel):
         return _ident(v, "schema")
 
 
-# Accepted ODBC driver names for SQL Server.  Used both by MssqlCreateDbRequest
-# validation and by the encrypt_clause detection — validating against this list
-# makes the "18" substring check safe.
+# Supported ODBC driver names for SQL Server, in preference order (newest first).
 _MSSQL_ODBC_DRIVERS = frozenset(["ODBC Driver 17 for SQL Server", "ODBC Driver 18 for SQL Server"])
+_MSSQL_ODBC_DRIVER_PREFERENCE = ["ODBC Driver 18 for SQL Server", "ODBC Driver 17 for SQL Server"]
+
+
+def _best_odbc_driver() -> str:
+    """Return the best available SQL Server ODBC driver installed on this system.
+    Prefers Driver 18 over 17.  Raises RuntimeError if neither is found."""
+    import pyodbc  # noqa: PLC0415
+
+    installed = set(pyodbc.drivers())
+    for driver in _MSSQL_ODBC_DRIVER_PREFERENCE:
+        if driver in installed:
+            return driver
+    raise RuntimeError(
+        f"No supported SQL Server ODBC driver found. Install one of: {', '.join(_MSSQL_ODBC_DRIVER_PREFERENCE)}"
+    )
 
 
 class MssqlCreateDbRequest(BaseModel):
@@ -165,7 +178,6 @@ class MssqlCreateDbRequest(BaseModel):
     app_login: str = "adminit_app"
     app_login_password: str
     db_schema: str = Field("adm", alias="schema")
-    odbc_driver: str = "ODBC Driver 17 for SQL Server"
     use_localhost_alias: bool = False
     # When False, the login is assumed to already exist on the server — the
     # CREATE LOGIN step is skipped and we only ensure the DB user and grants.
@@ -188,19 +200,12 @@ class MssqlCreateDbRequest(BaseModel):
     def validate_db_schema(cls, v: str) -> str:
         return _ident(v, "schema")
 
-    @field_validator("odbc_driver")
-    @classmethod
-    def validate_odbc_driver(cls, v: str) -> str:
-        if v not in _MSSQL_ODBC_DRIVERS:
-            raise ValueError(f"odbc_driver must be one of: {', '.join(sorted(_MSSQL_ODBC_DRIVERS))}")
-        return v
-
 
 class SysadminDeployRequest(BaseModel):
     """
     Sysadmin credentials passed from the frontend to deploy the schema using elevated
-    privileges.  Only accepted before the core config is saved (pre-config-save path).
-    Never persisted to disk.
+    privileges.  Only accepted before setup is fully complete.  Never persisted to disk.
+    The ODBC driver is auto-detected on the backend — it is not accepted from the client.
     """
 
     db_host: str
@@ -209,22 +214,19 @@ class SysadminDeployRequest(BaseModel):
     sysadmin_password: str
     db_name: str
     db_schema: str = Field("adm", alias="schema")
-    odbc_driver: str = "ODBC Driver 17 for SQL Server"
     use_localhost_alias: bool = False
 
     model_config = {"populate_by_name": True}
+
+    @field_validator("db_name")
+    @classmethod
+    def validate_db_name(cls, v: str) -> str:
+        return _ident(v, "db_name")
 
     @field_validator("db_schema", mode="before")
     @classmethod
     def validate_db_schema(cls, v: str) -> str:
         return _ident(v, "schema")
-
-    @field_validator("odbc_driver")
-    @classmethod
-    def validate_odbc_driver(cls, v: str) -> str:
-        if v not in _MSSQL_ODBC_DRIVERS:
-            raise ValueError(f"odbc_driver must be one of: {', '.join(sorted(_MSSQL_ODBC_DRIVERS))}")
-        return v
 
 
 def _deploy_via_sysadmin(req: SysadminDeployRequest) -> None:
@@ -237,23 +239,21 @@ def _deploy_via_sysadmin(req: SysadminDeployRequest) -> None:
     from app.utils.host_resolver import resolve_hostname  # noqa: PLC0415
 
     resolved_host = resolve_hostname(req.db_host, use_localhost_alias=req.use_localhost_alias)
-    # Explicit equality: "18" substring check would spuriously match future driver names.
-    encrypt_clause = (
-        ";Encrypt=yes;TrustServerCertificate=yes" if req.odbc_driver == "ODBC Driver 18 for SQL Server" else ""
-    )
+    driver = _best_odbc_driver()
+    encrypt_clause = ";Encrypt=yes;TrustServerCertificate=yes" if driver == "ODBC Driver 18 for SQL Server" else ""
 
-    # SERVER and DATABASE are brace-wrapped so that embedded semicolons or '=' characters
-    # cannot inject additional key-value pairs into the connection string.  A literal '}'
-    # inside a brace-wrapped value must be escaped as '}}'; host names and DB names are
-    # unlikely to contain '}', but we escape defensively.
-    host = resolved_host.replace("}", "}}")
-    db = req.db_name.replace("}", "}}")
+    # UID and PWD are brace-wrapped per the ODBC spec so that values containing ';',
+    # '=', or '}' cannot break the key=value structure.  SERVER and DATABASE are NOT
+    # brace-wrapped — the ODBC driver does not expect braces around these values and
+    # will misparse the connection string if they are present.  db_name is validated
+    # by _ident() (only [A-Za-z0-9_] allowed) and resolved_host is an IP/hostname
+    # (no semicolons possible), so injection is not a concern for these fields.
     uid = req.sysadmin_user.replace("}", "}}")
     pwd = req.sysadmin_password.replace("}", "}}")
     conn_str = (
-        f"DRIVER={{{req.odbc_driver}}};"
-        f"SERVER={{{host}}},{req.db_port};"
-        f"DATABASE={{{db}}};"
+        f"DRIVER={{{driver}}};"
+        f"SERVER={resolved_host},{req.db_port};"
+        f"DATABASE={req.db_name};"
         f"UID={{{uid}}};"
         f"PWD={{{pwd}}}" + encrypt_clause
     )
@@ -293,19 +293,18 @@ async def create_mssql_db(req: MssqlCreateDbRequest):
     schema = _bracket(req.db_schema)
     login = _bracket(req.app_login)  # DB user has same name as login
 
-    # odbc_driver validated against _MSSQL_ODBC_DRIVERS allowlist — "18" substring check is safe.
-    encrypt_clause = ";Encrypt=yes;TrustServerCertificate=yes" if "18" in req.odbc_driver else ""
+    driver = _best_odbc_driver()
+    encrypt_clause = ";Encrypt=yes;TrustServerCertificate=yes" if driver == "ODBC Driver 18 for SQL Server" else ""
 
-    # UID and PWD values are brace-wrapped per the ODBC connection string spec so that
-    # values containing ';', '=', or '}' cannot break the key=value structure or inject
-    # additional connection-string attributes.  A literal '}' inside a brace-wrapped
-    # value must be escaped as '}}'; sysadmin_user/password are plain str with no
-    # further restriction — the braces are the sole defence here.
+    # UID and PWD are brace-wrapped per the ODBC spec so that values containing ';',
+    # '=', or '}' cannot break the key=value structure.  SERVER and DATABASE are plain
+    # strings — new_db_name and db_schema are validated by _ident() and resolved_host
+    # is an IP/hostname, so injection via these fields is not possible.
     def _cs(database: str) -> str:
         uid = req.sysadmin_user.replace("}", "}}")
         pwd = req.sysadmin_password.replace("}", "}}")
         return (
-            f"DRIVER={{{req.odbc_driver}}};"
+            f"DRIVER={{{driver}}};"
             f"SERVER={resolved_host},{req.db_port};"
             f"DATABASE={database};"
             f"UID={{{uid}}};"
@@ -378,18 +377,16 @@ async def create_mssql_db(req: MssqlCreateDbRequest):
             "db_name": req.new_db_name,
             "db_user": req.app_login,
             "schema": req.db_schema,
-            "odbc_driver": req.odbc_driver,
             "use_localhost_alias": req.use_localhost_alias,
         },
-        # Non-secret sysadmin connection params returned so the frontend can pass them
-        # back to the deploy-schema endpoint.  Sysadmin credentials are NOT included here —
-        # the frontend holds them in memory from the form and appends them before the request.
+        # Non-secret sysadmin connection params for the frontend to pass back to
+        # deploy-schema.  Sysadmin credentials are NOT echoed — the frontend holds
+        # them in memory and appends them before the request.
         "sysadmin_connection": {
             "db_host": req.db_host,
             "db_port": req.db_port,
             "db_name": req.new_db_name,
             "schema": req.db_schema,
-            "odbc_driver": req.odbc_driver,
             "use_localhost_alias": req.use_localhost_alias,
         },
     }
@@ -412,13 +409,16 @@ async def test_connection(details: ConnDetails):
             ):
                 pass
         else:
+            driver = _best_odbc_driver()
+            encrypt_clause = (
+                ";Encrypt=yes;TrustServerCertificate=yes" if driver == "ODBC Driver 18 for SQL Server" else ""
+            )
             cs = (
-                f"DRIVER={{{details.odbc_driver}}};"
+                f"DRIVER={{{driver}}};"
                 f"SERVER={resolved_host},{details.db_port};"
                 f"DATABASE={details.db_name};"
                 f"UID={details.db_user};"
-                f"PWD={details.db_password}"
-                + (";Encrypt=yes;TrustServerCertificate=yes" if "18" in details.odbc_driver else "")
+                f"PWD={details.db_password}" + encrypt_clause
             )
             with pyodbc.connect(cs, timeout=5):
                 pass
@@ -554,6 +554,10 @@ async def setup(
     await test_connection(details)
 
     raw = details.model_dump(by_alias=True)
+    # For MSSQL, store the auto-detected driver rather than whatever the client sent.
+    # This ensures the saved config always uses the best available driver on this server.
+    if details.db_type == "mssql":
+        raw["odbc_driver"] = _best_odbc_driver()
     save_core_config(raw)
 
     # Reinitialise the backend singleton so protected routes pick up the new config

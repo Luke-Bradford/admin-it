@@ -2,10 +2,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Button from '../components/ui/Button';
-import Input, { Select } from '../components/ui/Input';
+import Input from '../components/ui/Input';
 import { Spinner } from '../components/ui';
-
-const ODBC_DRIVERS = ['ODBC Driver 17 for SQL Server', 'ODBC Driver 18 for SQL Server'];
 
 // ---------------------------------------------------------------------------
 // Step indicator
@@ -79,7 +77,6 @@ const DEFAULT_MSSQL_FORM = {
   password: '',
   database: '',
   schema: 'adm',
-  driver: ODBC_DRIVERS[0],
   // create-new fields
   sysadminUser: '',
   sysadminPassword: '',
@@ -130,7 +127,6 @@ function initialFormFromConnection(conn) {
     password: '',
     database: conn.db_name ?? '',
     schema: conn.schema ?? 'adm',
-    driver: conn.odbc_driver ?? ODBC_DRIVERS[0],
   };
 }
 
@@ -157,7 +153,7 @@ function StepConnection({ onSaved, onPendingMssql, initial }) {
   }
 
   function buildTestPayload() {
-    const base = {
+    return {
       db_type: form.dbType,
       db_host: form.host,
       db_port: parseInt(form.port, 10) || (form.dbType === 'postgres' ? 5432 : 1433),
@@ -167,10 +163,6 @@ function StepConnection({ onSaved, onPendingMssql, initial }) {
       schema: form.schema,
       use_localhost_alias: form.useLocalhostAlias,
     };
-    if (form.dbType === 'mssql') {
-      base.odbc_driver = form.driver;
-    }
-    return base;
   }
 
   function buildCreateDbPayload() {
@@ -197,10 +189,41 @@ function StepConnection({ onSaved, onPendingMssql, initial }) {
       app_login: form.appLogin,
       app_login_password: form.appLoginPassword,
       schema: form.schema,
-      odbc_driver: form.driver,
       use_localhost_alias: form.useLocalhostAlias,
       create_login: form.createLogin,
     };
+  }
+
+  function buildTestMssqlSysadminPayload() {
+    return {
+      db_type: 'mssql',
+      db_host: form.host,
+      db_port: parseInt(form.port, 10) || 1433,
+      db_user: form.sysadminUser,
+      db_password: form.sysadminPassword,
+      db_name: form.newDatabase || 'master',
+      schema: form.schema,
+      use_localhost_alias: form.useLocalhostAlias,
+    };
+  }
+
+  async function handleTestSysadmin() {
+    setLoading(true);
+    setFeedback(null);
+    try {
+      const res = await fetch('/api/setup/test-connection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildTestMssqlSysadminPayload()),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.detail ?? body.message ?? 'Connection failed.');
+      setFeedback({ type: 'success', message: body.message ?? 'Connection successful.' });
+    } catch (e) {
+      setFeedback({ type: 'error', message: e.message });
+    } finally {
+      setLoading(false);
+    }
   }
 
   // Only called from the Discover button, which is only rendered in !isCreateMode.
@@ -214,9 +237,6 @@ function StepConnection({ onSaved, onPendingMssql, initial }) {
       password: form.password,
       use_localhost_alias: form.useLocalhostAlias,
     };
-    if (form.dbType === 'mssql') {
-      payload.driver = form.driver ?? ODBC_DRIVERS[0];
-    }
     return payload;
   }
 
@@ -727,17 +747,6 @@ function StepConnection({ onSaved, onPendingMssql, initial }) {
                 </div>
               )}
             </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">ODBC driver</label>
-              <Select value={form.driver} onChange={(e) => set('driver', e.target.value)}>
-                {ODBC_DRIVERS.map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
-                ))}
-              </Select>
-            </div>
           </>
         )
       ) : (
@@ -818,18 +827,6 @@ function StepConnection({ onSaved, onPendingMssql, initial }) {
                 <code className="bg-gray-100 px-1 rounded">adm</code>
               </p>
             </div>
-            {!isPostgres && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">ODBC driver</label>
-                <Select value={form.driver} onChange={(e) => set('driver', e.target.value)}>
-                  {ODBC_DRIVERS.map((d) => (
-                    <option key={d} value={d}>
-                      {d}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-            )}
           </div>
         </>
       )}
@@ -837,6 +834,11 @@ function StepConnection({ onSaved, onPendingMssql, initial }) {
       <div className="flex items-center justify-end gap-3 pt-2">
         {!isCreateMode && (
           <Button type="button" variant="secondary" onClick={handleTest} disabled={loading}>
+            {loading ? <Spinner className="w-4 h-4" /> : 'Test connection'}
+          </Button>
+        )}
+        {isCreateMode && !isPostgres && (
+          <Button type="button" variant="secondary" onClick={handleTestSysadmin} disabled={loading}>
             {loading ? <Spinner className="w-4 h-4" /> : 'Test connection'}
           </Button>
         )}
