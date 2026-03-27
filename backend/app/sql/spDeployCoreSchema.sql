@@ -4,10 +4,10 @@ DECLARE @sql NVARCHAR(MAX) = '';
 DECLARE @crlf NVARCHAR(2) = CHAR(13) + CHAR(10);
 
 SET NOCOUNT ON;
+SET XACT_ABORT ON; -- ensures TRY/CATCH reliably catches errors from nested sp_executesql calls
 
 -- Create schema if missing.
--- Must run before the transaction: CREATE SCHEMA cannot run inside a
--- multi-statement transaction that also creates tables in the same schema.
+-- CREATE SCHEMA cannot run inside a multi-statement batch; must use EXEC() to isolate it.
 IF NOT EXISTS (SELECT * FROM sys.schemas WHERE name = @SchemaName)
 BEGIN
     EXEC('CREATE SCHEMA [' + @SchemaName + ']');
@@ -356,8 +356,5 @@ END TRY
 BEGIN CATCH
     IF @@TRANCOUNT > 0
         ROLLBACK TRANSACTION;
-    DECLARE @ErrMsg NVARCHAR(4000) = ERROR_MESSAGE();
-    DECLARE @ErrSev INT = ERROR_SEVERITY();
-    DECLARE @ErrState INT = ERROR_STATE();
-    RAISERROR(@ErrMsg, @ErrSev, @ErrState);
+    THROW; -- re-raises the original error exactly; preferred over RAISERROR reconstruction (SQL Server 2012+)
 END CATCH;
