@@ -351,6 +351,14 @@ This gives the same query interface as the SQL Server audit log — the audit UI
 
 ---
 
+#### #82 — Fix: CREATE TRIGGER must be first statement in its batch ✅ done
+**Size:** S
+**Persona:** System admin
+**Problem:** Schema deployment fails on SQL Server with `'CREATE TRIGGER' must be the first statement in a query batch`. All DDL was appended to a single `@sql` variable and executed in one `sp_executesql` call — the `DROP TRIGGER` preceding each `CREATE TRIGGER` meant `CREATE TRIGGER` was never first in its batch.
+**Fix:** Split trigger deployment: `EXEC sp_executesql @sql` now runs before the trigger section. Each trigger is then executed in two separate `sp_executesql @trig` calls — one for the `DROP IF EXISTS`, one for the `CREATE TRIGGER` — so each `CREATE TRIGGER` is the first (and only) statement in its own sub-batch. Tables, seed data, and audit_log remain in the original single-batch approach.
+
+---
+
 #### #81 — Setup wizard: SQL Server create-new — support existing login ✅ done
 **Size:** S
 **Persona:** System admin
@@ -535,6 +543,6 @@ This gives the same query interface as the SQL Server audit log — the audit UI
 
 ## Immediate next actions (in order)
 
-Phase 1 hardening is complete. Phase 2 (connection and user management) is done. Phase 1.5 (frontend overhaul) is done. Phase 2.5 setup wizard multi-database support is done (#75, #76, #77, #78, #79, #80, #81 done). Remaining work in priority order:
+Phase 1 hardening is complete. Phase 2 (connection and user management) is done. Phase 1.5 (frontend overhaul) is done. Phase 2.5 setup wizard multi-database support is done (#75, #76, #77, #78, #79, #80, #81, #82 done). Remaining work in priority order:
 
 1. **Phase 3 (data browser)** — the core end-user value — start with #12 (table browser)
