@@ -1045,7 +1045,7 @@ function StepDeploy({ onDeployed, onConnectExisting, onBack }) {
             onClick={onBack}
             className="text-sm text-gray-500 hover:text-gray-700 underline underline-offset-2"
           >
-            ← Change connection
+            &larr; Change connection
           </button>
         )}
         <Button
@@ -1226,14 +1226,18 @@ export default function SetupPage() {
         const conn = setup.connection;
         setSavedConnection(conn);
 
-        const deployRes = await fetch('/api/setup/deploy-status').then((r) => r.json());
+        const deployStatusRes = await fetch('/api/setup/deploy-status');
+        if (!deployStatusRes.ok) throw new Error('Failed to check schema status.');
+        const deployRes = await deployStatusRes.json();
         if (!deployRes.deployed) {
           // Schema not yet deployed — still in setup, no auth required.
           setStep(2);
           return;
         }
 
-        const adminRes = await fetch('/api/setup/admin-status').then((r) => r.json());
+        const adminStatusRes = await fetch('/api/setup/admin-status');
+        if (!adminStatusRes.ok) throw new Error('Failed to check admin status.');
+        const adminRes = await adminStatusRes.json();
         if (!adminRes.present) {
           // Schema deployed but no admin user yet — still in setup, no auth required.
           setStep(3);
