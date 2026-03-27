@@ -49,6 +49,38 @@ if not FERNET_KEY:
 fernet = Fernet(FERNET_KEY.encode())
 
 
+def _is_setup_fully_complete() -> bool:
+    """Return True only when all three setup steps are done: config saved, schema
+    deployed, and at least one SystemAdmin user present.  Used to gate create-db
+    endpoints so that a partially-complete setup never blocks recovery."""
+    if not core_config_exists():
+        return False
+    try:
+        from app.utils.db_helpers import get_backend  # noqa: PLC0415
+
+        backend = get_backend()
+        if not backend.is_schema_deployed():
+            return False
+        from app.utils.sql_helpers import quote_ident as qi  # noqa: PLC0415
+
+        schema = backend.schema
+        db_type = backend.db_type
+        with backend.get_engine().connect() as conn:
+            count = conn.execute(
+                text(f"""
+                SELECT COUNT(*) FROM {qi(schema, "Users", db_type)} u
+                JOIN {qi(schema, "UserRoles", db_type)} ur ON ur."UserId" = u."UserId"
+                JOIN {qi(schema, "Roles", db_type)} r ON r."RoleId" = ur."RoleId"
+                WHERE r."RoleName" = 'SystemAdmin'
+            """)
+            ).scalar()
+            return (count or 0) > 0
+    except Exception:
+        # If we cannot determine status, default to not blocking so the user
+        # can recover from a broken partial-setup state.
+        return False
+
+
 class ConnDetails(BaseModel):
     db_type: Literal["mssql", "postgres"] = "mssql"
     db_host: str
@@ -205,14 +237,23 @@ def _deploy_via_sysadmin(req: SysadminDeployRequest) -> None:
     from app.utils.host_resolver import resolve_hostname  # noqa: PLC0415
 
     resolved_host = resolve_hostname(req.db_host, use_localhost_alias=req.use_localhost_alias)
-    encrypt_clause = ";Encrypt=yes;TrustServerCertificate=yes" if "18" in req.odbc_driver else ""
+    # Explicit equality: "18" substring check would spuriously match future driver names.
+    encrypt_clause = (
+        ";Encrypt=yes;TrustServerCertificate=yes" if req.odbc_driver == "ODBC Driver 18 for SQL Server" else ""
+    )
 
+    # SERVER and DATABASE are brace-wrapped so that embedded semicolons or '=' characters
+    # cannot inject additional key-value pairs into the connection string.  A literal '}'
+    # inside a brace-wrapped value must be escaped as '}}'; host names and DB names are
+    # unlikely to contain '}', but we escape defensively.
+    host = resolved_host.replace("}", "}}")
+    db = req.db_name.replace("}", "}}")
     uid = req.sysadmin_user.replace("}", "}}")
     pwd = req.sysadmin_password.replace("}", "}}")
     conn_str = (
         f"DRIVER={{{req.odbc_driver}}};"
-        f"SERVER={resolved_host},{req.db_port};"
-        f"DATABASE={req.db_name};"
+        f"SERVER={{{host}}},{req.db_port};"
+        f"DATABASE={{{db}}};"
         f"UID={{{uid}}};"
         f"PWD={{{pwd}}}" + encrypt_clause
     )
@@ -242,7 +283,7 @@ async def create_mssql_db(req: MssqlCreateDbRequest):
     grants, then returns app-login credentials so the caller can proceed with
     the normal setup flow.  Sysadmin credentials are NOT persisted.
     """
-    if core_config_exists():
+    if _is_setup_fully_complete():
         raise HTTPException(status_code=403, detail="Setup already complete.")
 
     resolved_host = resolve_hostname(req.db_host, use_localhost_alias=req.use_localhost_alias)
@@ -391,16 +432,17 @@ async def create_postgres_db(req: PgCreateDbRequest):
     """
     PostgreSQL create-new-database path.
 
-    Only callable before setup is complete — once the core config exists this
-    endpoint returns 403 so it cannot be used as a post-install relay for
-    arbitrary superuser credentials.
+    Only callable before setup is fully complete — returns 403 once all three
+    setup steps are done, so it cannot be used as a post-install relay for
+    arbitrary superuser credentials.  A partially-complete setup (config saved
+    but schema not yet deployed) is allowed through so the user can recover.
 
     Connects with superuser credentials, creates the target database and a
     restricted application user, then returns the app-user credentials so the
     caller can proceed with the normal setup flow.  Superuser credentials are
     NOT persisted anywhere after this request completes.
     """
-    if core_config_exists():
+    if _is_setup_fully_complete():
         raise HTTPException(status_code=403, detail="Setup already complete.")
 
     resolved_host = resolve_hostname(req.db_host, use_localhost_alias=req.use_localhost_alias)
@@ -575,10 +617,11 @@ def trigger_deploy_schema(
     if already deployed.  Safe to call without authentication during the initial setup
     wizard flow after the core config has been saved.
 
-    `force=false`, body provided (pre-config-save path): deploys via sysadmin
-    credentials supplied in the request body.  Only accepted when the core config does
-    not yet exist — the body is rejected with 403 once a config is stored.  No token
-    required; sysadmin credentials are never persisted.
+    `force=false`, body provided (sysadmin path): deploys via sysadmin credentials
+    supplied in the request body.  Accepted while setup is not yet fully complete
+    (e.g. config saved but schema not yet deployed).  Rejected with 403 once all
+    three setup steps are done.  No token required; sysadmin credentials are never
+    persisted.
 
     `force=true`: re-deploys even when the schema already exists (disaster-recovery
     path).  Requires a valid SystemAdmin JWT.  Body is ignored for this path.
@@ -592,10 +635,10 @@ def trigger_deploy_schema(
 
     # Pre-config-save sysadmin deploy path.
     if body is not None and not force:
-        if core_config_exists():
+        if _is_setup_fully_complete():
             raise HTTPException(
                 status_code=403,
-                detail="Sysadmin deploy credentials are only accepted before the core config is saved.",
+                detail="Sysadmin deploy credentials are only accepted before setup is fully complete.",
             )
         try:
             _deploy_via_sysadmin(body)

@@ -876,12 +876,17 @@ function StepConnection({ onSaved, onPendingMssql, initial }) {
 //   sysadmin_user, sysadmin_password }.
 // When present, the Deploy button sends these as the request body so the backend
 // uses sysadmin credentials instead of the app-login engine.
-function StepDeploy({ onDeployed, onConnectExisting, onBack, deployOverride }) {
+//
+// saveError: when set, a post-deploy config-save failed; the error is shown
+// immediately so the user sees it rather than an invisible broken state.
+function StepDeploy({ onDeployed, onConnectExisting, onBack, deployOverride, saveError }) {
   // null = checking, true = already deployed, false = not deployed
   const [existingInstall, setExistingInstall] = useState(null);
   // 'idle' | 'confirm' — confirm state shows the re-deploy warning
   const [redeployMode, setRedeployMode] = useState('idle');
-  const [feedback, setFeedback] = useState(null);
+  const [feedback, setFeedback] = useState(
+    saveError ? { type: 'error', message: saveError } : null
+  );
   const [loading, setLoading] = useState(false);
 
   // On mount, detect whether the schema is already deployed.
@@ -1231,6 +1236,8 @@ export default function SetupPage() {
   // until schema deploy succeeds, at which point appConnection is saved as core config.
   // Never written to disk; cleared once config is saved.
   const [pendingMssqlSetup, setPendingMssqlSetup] = useState(null);
+  // Error to surface inside StepDeploy when the post-deploy config save fails.
+  const [deployStepError, setDeployStepError] = useState(null);
 
   const redirectToLogin = useCallback(() => navigate('/login', { replace: true }), [navigate]);
   const redirectToDashboard = useCallback(
@@ -1310,6 +1317,7 @@ export default function SetupPage() {
   function handleConnectionSaved(conn) {
     setSavedConnection(conn);
     setInitError(null);
+    setDeployStepError(null);
     setStep(2);
   }
 
@@ -1318,6 +1326,7 @@ export default function SetupPage() {
   function handlePendingMssql(pending) {
     setPendingMssqlSetup(pending);
     setInitError(null);
+    setDeployStepError(null);
     setStep(2);
   }
 
@@ -1333,15 +1342,18 @@ export default function SetupPage() {
         const saveBody = await saveRes.json();
         if (!saveRes.ok) throw new Error(saveBody.detail ?? saveBody.message ?? 'Save failed.');
         setSavedConnection(saveBody.connection);
-      } catch (e) {
-        // Surface the error on the deploy step rather than silently losing it.
-        // The user can retry saving from the connection step via the Back button.
-        setInitError(
-          `Schema deployed but failed to save connection: ${e.message}. Use "Change connection" to retry.`
-        );
-      } finally {
         setPendingMssqlSetup(null);
+        setStep(3);
+      } catch (e) {
+        // Schema deployed but config save failed. Keep the user on step 2 so they can
+        // see the error and retry. Surface the error via deployStepError so it appears
+        // in StepDeploy's own feedback area rather than the init-error banner.
+        setPendingMssqlSetup(null);
+        setDeployStepError(
+          `Schema deployed but failed to save connection: ${e.message}. Use "Change connection" to re-enter credentials.`
+        );
       }
+      return;
     }
     setStep(3);
   }
@@ -1362,6 +1374,7 @@ export default function SetupPage() {
 
   function handleBackToConnection() {
     setPendingMssqlSetup(null);
+    setDeployStepError(null);
     setStep(1);
   }
 
@@ -1436,6 +1449,7 @@ export default function SetupPage() {
                   onConnectExisting={handleConnectExisting}
                   onBack={handleBackToConnection}
                   deployOverride={pendingMssqlSetup?.sysadminDeploy ?? null}
+                  saveError={deployStepError}
                 />
               )}
               {step === 3 && <StepCreateAdmin onCreated={handleAdminCreated} />}
