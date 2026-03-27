@@ -865,7 +865,7 @@ function StepConnection({ onSaved, initial }) {
 // Step 2 — Schema deployment (with existing-install detection)
 // ---------------------------------------------------------------------------
 
-function StepDeploy({ onDeployed, onConnectExisting }) {
+function StepDeploy({ onDeployed, onConnectExisting, onBack }) {
   // null = checking, true = already deployed, false = not deployed
   const [existingInstall, setExistingInstall] = useState(null);
   // 'idle' | 'confirm' — confirm state shows the re-deploy warning
@@ -1038,8 +1038,22 @@ function StepDeploy({ onDeployed, onConnectExisting }) {
 
       <Feedback message={feedback?.message} type={feedback?.type} />
 
-      <div className="flex justify-end pt-2">
-        <Button type="button" onClick={() => handleDeploy(false)} disabled={loading}>
+      <div className="flex items-center justify-between pt-2">
+        {onBack && (
+          <button
+            type="button"
+            onClick={onBack}
+            className="text-sm text-gray-500 hover:text-gray-700 underline underline-offset-2"
+          >
+            &larr; Change connection
+          </button>
+        )}
+        <Button
+          type="button"
+          onClick={() => handleDeploy(false)}
+          disabled={loading}
+          className="ml-auto"
+        >
           {loading ? (
             <span className="flex items-center gap-2">
               <Spinner className="w-4 h-4" /> Deploying…
@@ -1185,6 +1199,8 @@ export default function SetupPage() {
 
   // null = still loading, number = current step (1-based)
   const [step, setStep] = useState(null);
+  // Error surfaced during initial status check (shown above the step card)
+  const [initError, setInitError] = useState(null);
   // Saved connection data — populated after step 1 completes
   const [savedConnection, setSavedConnection] = useState(null);
 
@@ -1206,7 +1222,31 @@ export default function SetupPage() {
           return;
         }
 
-        // Configured — requires SystemAdmin token to proceed.
+        // Config exists — check schema and admin status before deciding whether
+        // auth is needed. Steps 2 and 3 are still part of first-time setup and
+        // must be reachable without a token (the user hasn't created one yet).
+        const conn = setup.connection;
+        setSavedConnection(conn);
+
+        const deployStatusRes = await fetch('/api/setup/deploy-status');
+        if (!deployStatusRes.ok) throw new Error('Failed to check schema status.');
+        const deployRes = await deployStatusRes.json();
+        if (!deployRes.deployed) {
+          // Schema not yet deployed — still in setup, no auth required.
+          setStep(2);
+          return;
+        }
+
+        const adminStatusRes = await fetch('/api/setup/admin-status');
+        if (!adminStatusRes.ok) throw new Error('Failed to check admin status.');
+        const adminRes = await adminStatusRes.json();
+        if (!adminRes.present) {
+          // Schema deployed but no admin user yet — still in setup, no auth required.
+          setStep(3);
+          return;
+        }
+
+        // Fully configured. Only a SystemAdmin may re-enter the setup wizard.
         const token = localStorage.getItem('token');
         if (!token) {
           redirectToLogin();
@@ -1226,28 +1266,12 @@ export default function SetupPage() {
           return;
         }
 
-        // Restore connection form state from saved config.
-        const conn = setup.connection;
-        setSavedConnection(conn);
-
-        // Check schema deploy status first; only check admin-status if deployed.
-        const deployRes = await fetch('/api/setup/deploy-status').then((r) => r.json());
-
-        if (!deployRes.deployed) {
-          setStep(2);
-          return;
-        }
-
-        const adminRes = await fetch('/api/setup/admin-status').then((r) => r.json());
-
-        if (!adminRes.present) {
-          setStep(3);
-        } else {
-          // Fully configured — send to dashboard.
-          redirectToDashboard();
-        }
-      } catch {
-        // If the setup check itself fails, show step 1 so the user can try.
+        // SystemAdmin re-entering setup — send back to dashboard (nothing to do).
+        redirectToDashboard();
+      } catch (e) {
+        // Surface the error above the step card so the user knows why they
+        // landed on step 1 rather than where they expected.
+        setInitError(e.message ?? 'An error occurred checking setup status.');
         setStep(1);
       }
     }
@@ -1257,6 +1281,7 @@ export default function SetupPage() {
 
   function handleConnectionSaved(conn) {
     setSavedConnection(conn);
+    setInitError(null);
     setStep(2);
   }
 
@@ -1276,6 +1301,10 @@ export default function SetupPage() {
 
   function handleAdminCreated() {
     setStep(COMPLETE_STEP);
+  }
+
+  function handleBackToConnection() {
+    setStep(1);
   }
 
   // Loading state
@@ -1327,6 +1356,11 @@ export default function SetupPage() {
 
             {/* Step card */}
             <div className="bg-white shadow-sm border border-gray-200 rounded-lg p-6">
+              {initError && (
+                <div className="mb-4 rounded border border-danger-200 bg-danger-50 px-3 py-2 text-sm text-danger-700">
+                  {initError}
+                </div>
+              )}
               <h2 className="text-base font-semibold text-gray-900 mb-5">
                 Step {step} of {STEPS.length} — {STEPS[step - 1].label}
               </h2>
@@ -1338,7 +1372,11 @@ export default function SetupPage() {
                 />
               )}
               {step === 2 && (
-                <StepDeploy onDeployed={handleDeployed} onConnectExisting={handleConnectExisting} />
+                <StepDeploy
+                  onDeployed={handleDeployed}
+                  onConnectExisting={handleConnectExisting}
+                  onBack={handleBackToConnection}
+                />
               )}
               {step === 3 && <StepCreateAdmin onCreated={handleAdminCreated} />}
             </div>
