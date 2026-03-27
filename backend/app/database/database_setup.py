@@ -37,18 +37,21 @@ def is_core_schema_deployed(engine: Engine, schema: str = "adm") -> bool:
         return False
 
 
+def _load_deploy_sql(schema: str) -> str:
+    """Load the schema deployment SQL script and substitute the schema name placeholder."""
+    with open(SQL_FILE_PATH, "r", encoding="utf-8") as f:
+        sql = f.read()
+    placeholder = "DECLARE @SchemaName NVARCHAR(100) = 'changeme';"
+    replacement = f"DECLARE @SchemaName NVARCHAR(100) = '{schema}';"
+    return sql.replace(placeholder, replacement)
+
+
 def deploy_core_schema(engine: Engine, schema: str = "adm") -> None:
     """
     Deploys the core schema by loading and executing the schema deployment SQL script.
     """
     try:
-        with open(SQL_FILE_PATH, "r", encoding="utf-8") as file:
-            sql_script = file.read()
-
-        # Inject schema name by simple replacement (safe: schema comes from encrypted config, not user input)
-        placeholder = "DECLARE @SchemaName NVARCHAR(100) = 'changeme';"
-        replacement = f"DECLARE @SchemaName NVARCHAR(100) = '{schema}';"
-        sql_script = sql_script.replace(placeholder, replacement)
+        sql_script = _load_deploy_sql(schema)
 
         with engine.begin() as conn:
             conn.execute(text(sql_script))

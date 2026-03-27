@@ -134,7 +134,7 @@ function initialFormFromConnection(conn) {
   };
 }
 
-function StepConnection({ onSaved, initial }) {
+function StepConnection({ onSaved, onPendingMssql, initial }) {
   const [form, setForm] = useState(initial ?? DEFAULT_MSSQL_FORM);
   const [availableDatabases, setAvailableDatabases] = useState([]);
   const [feedback, setFeedback] = useState(null);
@@ -375,15 +375,21 @@ function StepConnection({ onSaved, initial }) {
       const createBody = await createRes.json();
       if (!createRes.ok) throw new Error(createBody.detail ?? 'Failed to create database.');
 
-      const connDetails = { ...createBody.connection, db_password: form.appLoginPassword };
-      const saveRes = await fetch('/api/setup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(connDetails),
+      // Don't save the core config yet — the schema must be deployed as sysadmin first
+      // (the app login lacks the privileges to create schemas and foreign keys).
+      // Pass both the app-login connection details and the sysadmin deploy params to
+      // the parent so it can supply them to StepDeploy without persisting anything to disk.
+      onPendingMssql({
+        appConnection: {
+          ...createBody.connection,
+          db_password: form.appLoginPassword,
+        },
+        sysadminDeploy: {
+          ...createBody.sysadmin_connection,
+          sysadmin_user: form.sysadminUser,
+          sysadmin_password: form.sysadminPassword,
+        },
       });
-      const saveBody = await saveRes.json();
-      if (!saveRes.ok) throw new Error(saveBody.detail ?? saveBody.message ?? 'Save failed.');
-      onSaved(saveBody.connection);
     } catch (e) {
       setFeedback({ type: 'error', message: e.message });
     } finally {
@@ -865,7 +871,12 @@ function StepConnection({ onSaved, initial }) {
 // Step 2 — Schema deployment (with existing-install detection)
 // ---------------------------------------------------------------------------
 
-function StepDeploy({ onDeployed, onConnectExisting, onBack }) {
+// deployOverride: when set (MSSQL create-new path), holds sysadmin connection params
+// { db_host, db_port, db_name, schema, odbc_driver, use_localhost_alias,
+//   sysadmin_user, sysadmin_password }.
+// When present, the Deploy button sends these as the request body so the backend
+// uses sysadmin credentials instead of the app-login engine.
+function StepDeploy({ onDeployed, onConnectExisting, onBack, deployOverride }) {
   // null = checking, true = already deployed, false = not deployed
   const [existingInstall, setExistingInstall] = useState(null);
   // 'idle' | 'confirm' — confirm state shows the re-deploy warning
@@ -874,7 +885,13 @@ function StepDeploy({ onDeployed, onConnectExisting, onBack }) {
   const [loading, setLoading] = useState(false);
 
   // On mount, detect whether the schema is already deployed.
+  // When deployOverride is set we cannot call deploy-status (core config not saved yet),
+  // so we skip detection and go straight to the fresh deploy flow.
   useEffect(() => {
+    if (deployOverride) {
+      setExistingInstall(false);
+      return;
+    }
     async function detect() {
       try {
         const res = await fetch('/api/setup/deploy-status');
@@ -887,20 +904,27 @@ function StepDeploy({ onDeployed, onConnectExisting, onBack }) {
       }
     }
     detect();
-  }, []);
+  }, [deployOverride]);
 
   async function handleDeploy(force = false) {
     setLoading(true);
     setFeedback(null);
     try {
       const headers = { 'Content-Type': 'application/json' };
+      let requestBody = undefined;
+
       if (force) {
         // force=true requires a SystemAdmin JWT — include it from localStorage.
         const token = localStorage.getItem('token');
         if (token) headers['Authorization'] = `Bearer ${token}`;
+      } else if (deployOverride) {
+        // Pre-config-save path: send sysadmin credentials so the backend deploys
+        // with elevated privileges before the app-login config is persisted.
+        requestBody = JSON.stringify(deployOverride);
       }
+
       const url = force ? '/api/setup/deploy-schema?force=true' : '/api/setup/deploy-schema';
-      const res = await fetch(url, { method: 'POST', headers });
+      const res = await fetch(url, { method: 'POST', headers, body: requestBody });
       const body = await res.json();
       if (!res.ok) throw new Error(body.detail ?? 'Deployment failed.');
       setFeedback({ type: 'success', message: body.message ?? 'Schema deployed successfully.' });
@@ -1203,6 +1227,10 @@ export default function SetupPage() {
   const [initError, setInitError] = useState(null);
   // Saved connection data — populated after step 1 completes
   const [savedConnection, setSavedConnection] = useState(null);
+  // MSSQL create-new path: holds app-login connection + sysadmin deploy params in memory
+  // until schema deploy succeeds, at which point appConnection is saved as core config.
+  // Never written to disk; cleared once config is saved.
+  const [pendingMssqlSetup, setPendingMssqlSetup] = useState(null);
 
   const redirectToLogin = useCallback(() => navigate('/login', { replace: true }), [navigate]);
   const redirectToDashboard = useCallback(
@@ -1285,7 +1313,36 @@ export default function SetupPage() {
     setStep(2);
   }
 
-  function handleDeployed() {
+  // Called by StepConnection when the user completes the MSSQL create-new flow.
+  // The core config is NOT saved yet — the schema must be deployed as sysadmin first.
+  function handlePendingMssql(pending) {
+    setPendingMssqlSetup(pending);
+    setInitError(null);
+    setStep(2);
+  }
+
+  async function handleDeployed() {
+    // MSSQL create-new path: save the app-login config now that schema deploy succeeded.
+    if (pendingMssqlSetup) {
+      try {
+        const saveRes = await fetch('/api/setup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(pendingMssqlSetup.appConnection),
+        });
+        const saveBody = await saveRes.json();
+        if (!saveRes.ok) throw new Error(saveBody.detail ?? saveBody.message ?? 'Save failed.');
+        setSavedConnection(saveBody.connection);
+      } catch (e) {
+        // Surface the error on the deploy step rather than silently losing it.
+        // The user can retry saving from the connection step via the Back button.
+        setInitError(
+          `Schema deployed but failed to save connection: ${e.message}. Use "Change connection" to retry.`
+        );
+      } finally {
+        setPendingMssqlSetup(null);
+      }
+    }
     setStep(3);
   }
 
@@ -1304,6 +1361,7 @@ export default function SetupPage() {
   }
 
   function handleBackToConnection() {
+    setPendingMssqlSetup(null);
     setStep(1);
   }
 
@@ -1368,6 +1426,7 @@ export default function SetupPage() {
               {step === 1 && (
                 <StepConnection
                   onSaved={handleConnectionSaved}
+                  onPendingMssql={handlePendingMssql}
                   initial={initialFormFromConnection(savedConnection)}
                 />
               )}
@@ -1376,6 +1435,7 @@ export default function SetupPage() {
                   onDeployed={handleDeployed}
                   onConnectExisting={handleConnectExisting}
                   onBack={handleBackToConnection}
+                  deployOverride={pendingMssqlSetup?.sysadminDeploy ?? null}
                 />
               )}
               {step === 3 && <StepCreateAdmin onCreated={handleAdminCreated} />}
