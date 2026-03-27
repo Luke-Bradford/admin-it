@@ -4,12 +4,17 @@ DECLARE @sql NVARCHAR(MAX) = '';
 DECLARE @crlf NVARCHAR(2) = CHAR(13) + CHAR(10);
 
 SET NOCOUNT ON;
+SET XACT_ABORT ON; -- ensures TRY/CATCH reliably catches errors from nested sp_executesql calls
 
--- Create schema if missing
+-- Create schema if missing.
+-- CREATE SCHEMA cannot run inside a multi-statement batch; must use EXEC() to isolate it.
 IF NOT EXISTS (SELECT * FROM sys.schemas WHERE name = @SchemaName)
 BEGIN
     EXEC('CREATE SCHEMA [' + @SchemaName + ']');
 END;
+
+BEGIN TRY
+BEGIN TRANSACTION;
 
 -------------------------------------
 -- USERS table with temporal support
@@ -65,7 +70,7 @@ CREATE TABLE [' + @SchemaName + '].[Roles] (
     ValidTo DATETIME2 GENERATED ALWAYS AS ROW END HIDDEN NOT NULL,
     PERIOD FOR SYSTEM_TIME (ValidFrom, ValidTo)
 ) WITH (SYSTEM_VERSIONING = ON (HISTORY_TABLE = [' + @SchemaName + '].[RolesHistory]));
-    
+
 CREATE TABLE [' + @SchemaName + '].[UserRoles] (
     UserId UNIQUEIDENTIFIER NOT NULL,
     RoleId UNIQUEIDENTIFIER NOT NULL,
@@ -100,7 +105,7 @@ CREATE TABLE [' + @SchemaName + '].[Connections] (
     ValidTo DATETIME2 GENERATED ALWAYS AS ROW END HIDDEN NOT NULL,
     PERIOD FOR SYSTEM_TIME (ValidFrom, ValidTo)
 ) WITH (SYSTEM_VERSIONING = ON (HISTORY_TABLE = [' + @SchemaName + '].[ConnectionsHistory]));
-    
+
 CREATE TABLE [' + @SchemaName + '].[ConnectionPermissions] (
     PermissionId UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
     PermissionName NVARCHAR(50) NOT NULL UNIQUE,
@@ -176,19 +181,48 @@ END
 ';
 
 -----------------------------------------
+-- Seed Data for Roles and Permissions
+-----------------------------------------
+SET @sql += '
+IF NOT EXISTS (SELECT 1 FROM [' + @SchemaName + '].[Roles] WHERE RoleName = ''SystemAdmin'')
+    INSERT INTO [' + @SchemaName + '].[Roles] (RoleId, RoleName, CreatedById, CreatedDate, ModifiedById, ModifiedDate)
+    VALUES (NEWID(), ''SystemAdmin'', NULL, SYSUTCDATETIME(), NULL, SYSUTCDATETIME());
+
+IF NOT EXISTS (SELECT 1 FROM [' + @SchemaName + '].[ConnectionPermissions])
+    BEGIN
+        INSERT INTO [' + @SchemaName + '].[ConnectionPermissions] (PermissionId, PermissionName)
+        VALUES (NEWID(), ''Read''), (NEWID(), ''Write''), (NEWID(), ''Admin'');
+    END
+
+IF NOT EXISTS (SELECT NULL FROM [' + @SchemaName + '].[Secrets] WHERE SecretType = ''JWT_SECRET'')
+    INSERT INTO [' + @SchemaName + '].[Secrets] (SecretId, SecretType, SecretDescription, SecretValue)
+    VALUES (NEWID(), ''JWT_SECRET'', ''Used to sign JWT tokens'', CONCAT('''', CONVERT(VARCHAR(MAX), CONVERT(VARBINARY(MAX), CRYPT_GEN_RANDOM(32)), 2)));
+';
+
+-- Execute tables, audit_log, and seed data
+EXEC sp_executesql @sql;
+
+-----------------------------------------
 -- AUDIT TRIGGERS
+-- CREATE TRIGGER must be the first statement in its batch.
+-- Each trigger is therefore executed in its own sp_executesql call,
+-- preceded by a separate call to drop the old version if it exists.
 -- One trigger per audited table.  Each trigger writes one row to audit_log
 -- per statement (not per row) using FOR JSON AUTO.  The application user
 -- identity is stored in SESSION_CONTEXT(N''app_user_id''), set by the
 -- SQLAlchemy connection event in mssql_backend.py.
--- DROP + CREATE keeps the script idempotent.
 -----------------------------------------
-SET @sql += '
+DECLARE @trig NVARCHAR(MAX);
+
+-- trg_audit_Users
+SET @trig = '
 IF EXISTS (SELECT 1 FROM sys.triggers WHERE name = ''trg_audit_Users''
            AND parent_id = OBJECT_ID(''[' + @SchemaName + '].[Users]''))
     DROP TRIGGER [' + @SchemaName + '].[trg_audit_Users];
 ';
-SET @sql += '
+EXEC sp_executesql @trig;
+
+SET @trig = '
 CREATE TRIGGER [' + @SchemaName + '].[trg_audit_Users]
 ON [' + @SchemaName + '].[Users]
 AFTER INSERT, UPDATE, DELETE
@@ -212,13 +246,17 @@ BEGIN
     VALUES (''Users'', @rid, @action, @uid, @old, @new);
 END
 ';
+EXEC sp_executesql @trig;
 
-SET @sql += '
+-- trg_audit_Connections
+SET @trig = '
 IF EXISTS (SELECT 1 FROM sys.triggers WHERE name = ''trg_audit_Connections''
            AND parent_id = OBJECT_ID(''[' + @SchemaName + '].[Connections]''))
     DROP TRIGGER [' + @SchemaName + '].[trg_audit_Connections];
 ';
-SET @sql += '
+EXEC sp_executesql @trig;
+
+SET @trig = '
 CREATE TRIGGER [' + @SchemaName + '].[trg_audit_Connections]
 ON [' + @SchemaName + '].[Connections]
 AFTER INSERT, UPDATE, DELETE
@@ -242,13 +280,17 @@ BEGIN
     VALUES (''Connections'', @rid, @action, @uid, @old, @new);
 END
 ';
+EXEC sp_executesql @trig;
 
-SET @sql += '
+-- trg_audit_ConnectionPermissions
+SET @trig = '
 IF EXISTS (SELECT 1 FROM sys.triggers WHERE name = ''trg_audit_ConnectionPermissions''
            AND parent_id = OBJECT_ID(''[' + @SchemaName + '].[ConnectionPermissions]''))
     DROP TRIGGER [' + @SchemaName + '].[trg_audit_ConnectionPermissions];
 ';
-SET @sql += '
+EXEC sp_executesql @trig;
+
+SET @trig = '
 CREATE TRIGGER [' + @SchemaName + '].[trg_audit_ConnectionPermissions]
 ON [' + @SchemaName + '].[ConnectionPermissions]
 AFTER INSERT, UPDATE, DELETE
@@ -272,13 +314,17 @@ BEGIN
     VALUES (''ConnectionPermissions'', @rid, @action, @uid, @old, @new);
 END
 ';
+EXEC sp_executesql @trig;
 
-SET @sql += '
+-- trg_audit_Secrets
+SET @trig = '
 IF EXISTS (SELECT 1 FROM sys.triggers WHERE name = ''trg_audit_Secrets''
            AND parent_id = OBJECT_ID(''[' + @SchemaName + '].[Secrets]''))
     DROP TRIGGER [' + @SchemaName + '].[trg_audit_Secrets];
 ';
-SET @sql += '
+EXEC sp_executesql @trig;
+
+SET @trig = '
 CREATE TRIGGER [' + @SchemaName + '].[trg_audit_Secrets]
 ON [' + @SchemaName + '].[Secrets]
 AFTER INSERT, UPDATE, DELETE
@@ -303,25 +349,12 @@ BEGIN
     VALUES (''Secrets'', @rid, @action, @uid, @old, @new);
 END
 ';
+EXEC sp_executesql @trig;
 
------------------------------------------
--- Seed Data for Roles and Permissions
------------------------------------------
-SET @sql += '
-IF NOT EXISTS (SELECT 1 FROM [' + @SchemaName + '].[Roles] WHERE RoleName = ''SystemAdmin'')
-    INSERT INTO [' + @SchemaName + '].[Roles] (RoleId, RoleName, CreatedById, CreatedDate, ModifiedById, ModifiedDate)
-    VALUES (NEWID(), ''SystemAdmin'', NULL, SYSUTCDATETIME(), NULL, SYSUTCDATETIME());
-    
-IF NOT EXISTS (SELECT 1 FROM [' + @SchemaName + '].[ConnectionPermissions])
-    BEGIN
-        INSERT INTO [' + @SchemaName + '].[ConnectionPermissions] (PermissionId, PermissionName)
-        VALUES (NEWID(), ''Read''), (NEWID(), ''Write''), (NEWID(), ''Admin'');
-    END
-
-IF NOT EXISTS (SELECT NULL FROM [' + @SchemaName + '].[Secrets] WHERE SecretType = ''JWT_SECRET'')
-    INSERT INTO [' + @SchemaName + '].[Secrets] (SecretId, SecretType, SecretDescription, SecretValue)
-    VALUES (NEWID(), ''JWT_SECRET'', ''Used to sign JWT tokens'', CONCAT('''', CONVERT(VARCHAR(MAX), CONVERT(VARBINARY(MAX), CRYPT_GEN_RANDOM(32)), 2)));
-';
-
--- Execute the constructed SQL
-EXEC sp_executesql @sql;
+COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0
+        ROLLBACK TRANSACTION;
+    THROW; -- re-raises the original error exactly; preferred over RAISERROR reconstruction (SQL Server 2012+)
+END CATCH;
