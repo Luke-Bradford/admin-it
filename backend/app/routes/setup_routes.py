@@ -135,6 +135,9 @@ class MssqlCreateDbRequest(BaseModel):
     db_schema: str = Field("adm", alias="schema")
     odbc_driver: str = "ODBC Driver 17 for SQL Server"
     use_localhost_alias: bool = False
+    # When False, the login is assumed to already exist on the server — the
+    # CREATE LOGIN step is skipped and we only ensure the DB user and grants.
+    create_login: bool = True
 
     model_config = {"populate_by_name": True}
 
@@ -204,32 +207,28 @@ async def create_mssql_db(req: MssqlCreateDbRequest):
         )
 
     try:
-        # --- Step 1: connect to master, create the database and login ---
+        # escaped_login is used in both the optional CREATE LOGIN and the DB user check.
+        # SQL Server does not support bind parameters in DDL — single quotes are escaped
+        # by doubling, which is the standard T-SQL mechanism.  _ident() validation means
+        # app_login cannot contain single quotes in practice, but we escape for depth.
+        escaped_login = req.app_login.replace("'", "''")
+
+        # --- Step 1: connect to master, create the database and (optionally) login ---
         with pyodbc.connect(_cs("master"), timeout=10) as master_conn:
             master_conn.autocommit = True
             with master_conn.cursor() as cur:
                 # Create database (idempotent)
                 cur.execute(f"IF DB_ID(N'{req.new_db_name}') IS NULL CREATE DATABASE {db}")
-                # Create login (idempotent).
-                # SQL Server does not support bind parameters in DDL, so the password
-                # is embedded as a T-SQL string literal.  Single quotes are escaped by
-                # doubling them, which is the standard T-SQL escaping mechanism.
-                # Both the password and the login name are embedded as T-SQL string
-                # literals (SQL Server DDL does not support bind parameters).
-                # Single quotes are escaped by doubling — the only injection vector
-                # in a T-SQL N'...' literal.  _ident() validation on app_login means
-                # it cannot contain single quotes in practice, but we escape anyway
-                # for consistency and defence-in-depth.
-                escaped_pwd = req.app_login_password.replace("'", "''")
-                escaped_login = req.app_login.replace("'", "''")
-                cur.execute(
-                    f"""
-                    IF NOT EXISTS (
-                        SELECT 1 FROM sys.server_principals WHERE name = N'{escaped_login}'
+                if req.create_login:
+                    escaped_pwd = req.app_login_password.replace("'", "''")
+                    cur.execute(
+                        f"""
+                        IF NOT EXISTS (
+                            SELECT 1 FROM sys.server_principals WHERE name = N'{escaped_login}'
+                        )
+                        CREATE LOGIN {login} WITH PASSWORD = N'{escaped_pwd}'
+                        """
                     )
-                    CREATE LOGIN {login} WITH PASSWORD = N'{escaped_pwd}'
-                    """
-                )
 
         # --- Step 2: connect to the new database, create DB user and grant permissions ---
         with pyodbc.connect(_cs(req.new_db_name), timeout=10) as db_conn:

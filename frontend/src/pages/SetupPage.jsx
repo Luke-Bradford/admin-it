@@ -86,6 +86,7 @@ const DEFAULT_MSSQL_FORM = {
   newDatabase: '',
   appLogin: 'adminit_app',
   appLoginPassword: '',
+  createLogin: true,
 };
 
 const DEFAULT_PG_FORM = {
@@ -198,6 +199,7 @@ function StepConnection({ onSaved, initial }) {
       schema: form.schema,
       odbc_driver: form.driver,
       use_localhost_alias: form.useLocalhostAlias,
+      create_login: form.createLogin,
     };
   }
 
@@ -358,7 +360,7 @@ function StepConnection({ onSaved, initial }) {
       setFeedback({ type: 'error', message: 'App login name is required.' });
       return;
     }
-    if (!form.appLoginPassword) {
+    if (form.createLogin && !form.appLoginPassword) {
       setFeedback({ type: 'error', message: 'App login password is required.' });
       return;
     }
@@ -694,22 +696,30 @@ function StepConnection({ onSaved, initial }) {
                   onChange={(e) => set('appLogin', e.target.value)}
                   placeholder="adminit_app"
                 />
-                <p className="mt-1 text-xs text-gray-400">
-                  A restricted SQL login created for AdminIT.
-                </p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  App login password <span className="text-danger-600">*</span>
+                <label className="mt-2 flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    className="rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+                    checked={form.createLogin}
+                    onChange={(e) => set('createLogin', e.target.checked)}
+                  />
+                  <span>Create this login (uncheck if it already exists on the server)</span>
                 </label>
-                <Input
-                  type="password"
-                  required
-                  value={form.appLoginPassword}
-                  onChange={(e) => set('appLoginPassword', e.target.value)}
-                  autoComplete="new-password"
-                />
               </div>
+              {form.createLogin && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    App login password <span className="text-danger-600">*</span>
+                  </label>
+                  <Input
+                    type="password"
+                    required
+                    value={form.appLoginPassword}
+                    onChange={(e) => set('appLoginPassword', e.target.value)}
+                    autoComplete="new-password"
+                  />
+                </div>
+              )}
             </div>
 
             <div>
