@@ -865,7 +865,7 @@ function StepConnection({ onSaved, initial }) {
 // Step 2 — Schema deployment (with existing-install detection)
 // ---------------------------------------------------------------------------
 
-function StepDeploy({ onDeployed, onConnectExisting }) {
+function StepDeploy({ onDeployed, onConnectExisting, onBack }) {
   // null = checking, true = already deployed, false = not deployed
   const [existingInstall, setExistingInstall] = useState(null);
   // 'idle' | 'confirm' — confirm state shows the re-deploy warning
@@ -1038,8 +1038,22 @@ function StepDeploy({ onDeployed, onConnectExisting }) {
 
       <Feedback message={feedback?.message} type={feedback?.type} />
 
-      <div className="flex justify-end pt-2">
-        <Button type="button" onClick={() => handleDeploy(false)} disabled={loading}>
+      <div className="flex items-center justify-between pt-2">
+        {onBack && (
+          <button
+            type="button"
+            onClick={onBack}
+            className="text-sm text-gray-500 hover:text-gray-700 underline underline-offset-2"
+          >
+            ← Change connection
+          </button>
+        )}
+        <Button
+          type="button"
+          onClick={() => handleDeploy(false)}
+          disabled={loading}
+          className="ml-auto"
+        >
           {loading ? (
             <span className="flex items-center gap-2">
               <Spinner className="w-4 h-4" /> Deploying…
@@ -1206,7 +1220,27 @@ export default function SetupPage() {
           return;
         }
 
-        // Configured — requires SystemAdmin token to proceed.
+        // Config exists — check schema and admin status before deciding whether
+        // auth is needed. Steps 2 and 3 are still part of first-time setup and
+        // must be reachable without a token (the user hasn't created one yet).
+        const conn = setup.connection;
+        setSavedConnection(conn);
+
+        const deployRes = await fetch('/api/setup/deploy-status').then((r) => r.json());
+        if (!deployRes.deployed) {
+          // Schema not yet deployed — still in setup, no auth required.
+          setStep(2);
+          return;
+        }
+
+        const adminRes = await fetch('/api/setup/admin-status').then((r) => r.json());
+        if (!adminRes.present) {
+          // Schema deployed but no admin user yet — still in setup, no auth required.
+          setStep(3);
+          return;
+        }
+
+        // Fully configured. Only a SystemAdmin may re-enter the setup wizard.
         const token = localStorage.getItem('token');
         if (!token) {
           redirectToLogin();
@@ -1226,26 +1260,8 @@ export default function SetupPage() {
           return;
         }
 
-        // Restore connection form state from saved config.
-        const conn = setup.connection;
-        setSavedConnection(conn);
-
-        // Check schema deploy status first; only check admin-status if deployed.
-        const deployRes = await fetch('/api/setup/deploy-status').then((r) => r.json());
-
-        if (!deployRes.deployed) {
-          setStep(2);
-          return;
-        }
-
-        const adminRes = await fetch('/api/setup/admin-status').then((r) => r.json());
-
-        if (!adminRes.present) {
-          setStep(3);
-        } else {
-          // Fully configured — send to dashboard.
-          redirectToDashboard();
-        }
+        // SystemAdmin re-entering setup — send back to dashboard (nothing to do).
+        redirectToDashboard();
       } catch {
         // If the setup check itself fails, show step 1 so the user can try.
         setStep(1);
@@ -1276,6 +1292,10 @@ export default function SetupPage() {
 
   function handleAdminCreated() {
     setStep(COMPLETE_STEP);
+  }
+
+  function handleBackToConnection() {
+    setStep(1);
   }
 
   // Loading state
@@ -1338,7 +1358,11 @@ export default function SetupPage() {
                 />
               )}
               {step === 2 && (
-                <StepDeploy onDeployed={handleDeployed} onConnectExisting={handleConnectExisting} />
+                <StepDeploy
+                  onDeployed={handleDeployed}
+                  onConnectExisting={handleConnectExisting}
+                  onBack={handleBackToConnection}
+                />
               )}
               {step === 3 && <StepCreateAdmin onCreated={handleAdminCreated} />}
             </div>
