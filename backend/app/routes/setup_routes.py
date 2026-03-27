@@ -207,6 +207,12 @@ async def create_mssql_db(req: MssqlCreateDbRequest):
         )
 
     try:
+        # escaped_login is used in both the optional CREATE LOGIN and the DB user check.
+        # SQL Server does not support bind parameters in DDL — single quotes are escaped
+        # by doubling, which is the standard T-SQL mechanism.  _ident() validation means
+        # app_login cannot contain single quotes in practice, but we escape for depth.
+        escaped_login = req.app_login.replace("'", "''")
+
         # --- Step 1: connect to master, create the database and (optionally) login ---
         with pyodbc.connect(_cs("master"), timeout=10) as master_conn:
             master_conn.autocommit = True
@@ -214,12 +220,6 @@ async def create_mssql_db(req: MssqlCreateDbRequest):
                 # Create database (idempotent)
                 cur.execute(f"IF DB_ID(N'{req.new_db_name}') IS NULL CREATE DATABASE {db}")
                 if req.create_login:
-                    # SQL Server does not support bind parameters in DDL, so the password
-                    # is embedded as a T-SQL string literal.  Single quotes are escaped by
-                    # doubling — the only injection vector in a T-SQL N'...' literal.
-                    # _ident() validation on app_login means it cannot contain single
-                    # quotes in practice, but we escape anyway for defence-in-depth.
-                    escaped_login = req.app_login.replace("'", "''")
                     escaped_pwd = req.app_login_password.replace("'", "''")
                     cur.execute(
                         f"""
@@ -231,7 +231,6 @@ async def create_mssql_db(req: MssqlCreateDbRequest):
                     )
 
         # --- Step 2: connect to the new database, create DB user and grant permissions ---
-        escaped_login_db = req.app_login.replace("'", "''")
         with pyodbc.connect(_cs(req.new_db_name), timeout=10) as db_conn:
             db_conn.autocommit = True
             with db_conn.cursor() as cur:
@@ -245,7 +244,7 @@ async def create_mssql_db(req: MssqlCreateDbRequest):
                 cur.execute(
                     f"""
                     IF NOT EXISTS (
-                        SELECT 1 FROM sys.database_principals WHERE name = N'{escaped_login_db}'
+                        SELECT 1 FROM sys.database_principals WHERE name = N'{escaped_login}'
                     )
                     CREATE USER {login} FOR LOGIN {login}
                     """
