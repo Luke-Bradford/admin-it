@@ -360,7 +360,7 @@ function StepConnection({ onSaved, initial }) {
       setFeedback({ type: 'error', message: 'App login name is required.' });
       return;
     }
-    if (!form.appLoginPassword) {
+    if (form.createLogin && !form.appLoginPassword) {
       setFeedback({ type: 'error', message: 'App login password is required.' });
       return;
     }
@@ -706,18 +706,20 @@ function StepConnection({ onSaved, initial }) {
                   <span>Create this login (uncheck if it already exists on the server)</span>
                 </label>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  App login password <span className="text-danger-600">*</span>
-                </label>
-                <Input
-                  type="password"
-                  required
-                  value={form.appLoginPassword}
-                  onChange={(e) => set('appLoginPassword', e.target.value)}
-                  autoComplete="new-password"
-                />
-              </div>
+              {form.createLogin && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    App login password <span className="text-danger-600">*</span>
+                  </label>
+                  <Input
+                    type="password"
+                    required
+                    value={form.appLoginPassword}
+                    onChange={(e) => set('appLoginPassword', e.target.value)}
+                    autoComplete="new-password"
+                  />
+                </div>
+              )}
             </div>
 
             <div>

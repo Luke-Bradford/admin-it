@@ -208,8 +208,6 @@ async def create_mssql_db(req: MssqlCreateDbRequest):
 
     try:
         # --- Step 1: connect to master, create the database and (optionally) login ---
-        escaped_pwd = req.app_login_password.replace("'", "''")
-        escaped_login = req.app_login.replace("'", "''")
         with pyodbc.connect(_cs("master"), timeout=10) as master_conn:
             master_conn.autocommit = True
             with master_conn.cursor() as cur:
@@ -221,6 +219,8 @@ async def create_mssql_db(req: MssqlCreateDbRequest):
                     # doubling — the only injection vector in a T-SQL N'...' literal.
                     # _ident() validation on app_login means it cannot contain single
                     # quotes in practice, but we escape anyway for defence-in-depth.
+                    escaped_login = req.app_login.replace("'", "''")
+                    escaped_pwd = req.app_login_password.replace("'", "''")
                     cur.execute(
                         f"""
                         IF NOT EXISTS (
@@ -231,6 +231,7 @@ async def create_mssql_db(req: MssqlCreateDbRequest):
                     )
 
         # --- Step 2: connect to the new database, create DB user and grant permissions ---
+        escaped_login_db = req.app_login.replace("'", "''")
         with pyodbc.connect(_cs(req.new_db_name), timeout=10) as db_conn:
             db_conn.autocommit = True
             with db_conn.cursor() as cur:
@@ -244,7 +245,7 @@ async def create_mssql_db(req: MssqlCreateDbRequest):
                 cur.execute(
                     f"""
                     IF NOT EXISTS (
-                        SELECT 1 FROM sys.database_principals WHERE name = N'{escaped_login}'
+                        SELECT 1 FROM sys.database_principals WHERE name = N'{escaped_login_db}'
                     )
                     CREATE USER {login} FOR LOGIN {login}
                     """
