@@ -884,10 +884,14 @@ function StepDeploy({ onDeployed, onConnectExisting, onBack, deployOverride, sav
   const [existingInstall, setExistingInstall] = useState(null);
   // 'idle' | 'confirm' — confirm state shows the re-deploy warning
   const [redeployMode, setRedeployMode] = useState('idle');
-  const [feedback, setFeedback] = useState(
-    saveError ? { type: 'error', message: saveError } : null
-  );
+  const [feedback, setFeedback] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  // Sync saveError prop into local feedback. useState initialiser only runs once,
+  // so a prop change on an already-mounted component needs an effect to propagate.
+  useEffect(() => {
+    if (saveError) setFeedback({ type: 'error', message: saveError });
+  }, [saveError]);
 
   // On mount, detect whether the schema is already deployed.
   // When deployOverride is set we cannot call deploy-status (core config not saved yet),
