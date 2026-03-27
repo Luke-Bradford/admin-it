@@ -351,6 +351,18 @@ This gives the same query interface as the SQL Server audit log — the audit UI
 
 ---
 
+#### #81 — Setup wizard: SQL Server create-new — support existing login ✅ done
+**Size:** S
+**Persona:** System admin
+**Problem:** The "Create new database" path always attempts to create a new SQL login. A System Admin who has already created a dedicated app login on the server cannot reuse it — they are forced to create a duplicate or delete and recreate.
+**Background:** Extends #80. A simple `create_login` boolean on the backend request skips the `CREATE LOGIN` step when `False`. The DB user and schema/grant steps still run, so the login gets the correct permissions on the newly-created database regardless. The frontend adds a checkbox "Create this login (uncheck if it already exists on the server)", checked by default.
+**Acceptance criteria:**
+- `POST /api/setup/create-mssql-db` accepts `create_login: bool` (default `true`); when `false`, the `CREATE LOGIN` step is skipped
+- DB user creation and schema grants still run unconditionally
+- Frontend checkbox in the SQL Server create-new form; checked by default; unchecking sends `create_login: false`
+
+---
+
 #### #80 — Setup wizard: SQL Server create-new database path ✅ done
 **Size:** M
 **Persona:** System admin
@@ -523,6 +535,6 @@ This gives the same query interface as the SQL Server audit log — the audit UI
 
 ## Immediate next actions (in order)
 
-Phase 1 hardening is complete. Phase 2 (connection and user management) is done. Phase 1.5 (frontend overhaul) is done. Phase 2.5 setup wizard multi-database support is done (#75, #76, #77, #78, #79 done). Remaining work in priority order:
+Phase 1 hardening is complete. Phase 2 (connection and user management) is done. Phase 1.5 (frontend overhaul) is done. Phase 2.5 setup wizard multi-database support is done (#75, #76, #77, #78, #79, #80, #81 done). Remaining work in priority order:
 
 1. **Phase 3 (data browser)** — the core end-user value — start with #12 (table browser)
