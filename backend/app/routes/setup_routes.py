@@ -6,14 +6,14 @@ import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Optional
 
 import psycopg2
 import psycopg2.sql
 import pyodbc
 from cryptography.fernet import Fernet, InvalidToken
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, field_validator
@@ -47,6 +47,38 @@ FERNET_KEY = os.getenv("CORE_FERNET_KEY")
 if not FERNET_KEY:
     raise RuntimeError("Missing CORE_FERNET_KEY")
 fernet = Fernet(FERNET_KEY.encode())
+
+
+def _is_setup_fully_complete() -> bool:
+    """Return True only when all three setup steps are done: config saved, schema
+    deployed, and at least one SystemAdmin user present.  Used to gate create-db
+    endpoints so that a partially-complete setup never blocks recovery."""
+    if not core_config_exists():
+        return False
+    try:
+        from app.utils.db_helpers import get_backend  # noqa: PLC0415
+
+        backend = get_backend()
+        if not backend.is_schema_deployed():
+            return False
+        from app.utils.sql_helpers import quote_ident as qi  # noqa: PLC0415
+
+        schema = backend.schema
+        db_type = backend.db_type
+        with backend.get_engine().connect() as conn:
+            count = conn.execute(
+                text(f"""
+                SELECT COUNT(*) FROM {qi(schema, "Users", db_type)} u
+                JOIN {qi(schema, "UserRoles", db_type)} ur ON ur."UserId" = u."UserId"
+                JOIN {qi(schema, "Roles", db_type)} r ON r."RoleId" = ur."RoleId"
+                WHERE r."RoleName" = 'SystemAdmin'
+            """)
+            ).scalar()
+            return (count or 0) > 0
+    except Exception:
+        # If we cannot determine status, default to not blocking so the user
+        # can recover from a broken partial-setup state.
+        return False
 
 
 class ConnDetails(BaseModel):
@@ -164,6 +196,80 @@ class MssqlCreateDbRequest(BaseModel):
         return v
 
 
+class SysadminDeployRequest(BaseModel):
+    """
+    Sysadmin credentials passed from the frontend to deploy the schema using elevated
+    privileges.  Only accepted before the core config is saved (pre-config-save path).
+    Never persisted to disk.
+    """
+
+    db_host: str
+    db_port: int = 1433
+    sysadmin_user: str
+    sysadmin_password: str
+    db_name: str
+    db_schema: str = Field("adm", alias="schema")
+    odbc_driver: str = "ODBC Driver 17 for SQL Server"
+    use_localhost_alias: bool = False
+
+    model_config = {"populate_by_name": True}
+
+    @field_validator("db_schema", mode="before")
+    @classmethod
+    def validate_db_schema(cls, v: str) -> str:
+        return _ident(v, "schema")
+
+    @field_validator("odbc_driver")
+    @classmethod
+    def validate_odbc_driver(cls, v: str) -> str:
+        if v not in _MSSQL_ODBC_DRIVERS:
+            raise ValueError(f"odbc_driver must be one of: {', '.join(sorted(_MSSQL_ODBC_DRIVERS))}")
+        return v
+
+
+def _deploy_via_sysadmin(req: SysadminDeployRequest) -> None:
+    """
+    Execute the schema deployment script using sysadmin credentials via a direct
+    pyodbc connection.  Called from the pre-config-save path so that the schema is
+    created with sufficient privileges before the restricted app login is persisted.
+    """
+    from app.database.database_setup import _load_deploy_sql  # noqa: PLC0415
+    from app.utils.host_resolver import resolve_hostname  # noqa: PLC0415
+
+    resolved_host = resolve_hostname(req.db_host, use_localhost_alias=req.use_localhost_alias)
+    # Explicit equality: "18" substring check would spuriously match future driver names.
+    encrypt_clause = (
+        ";Encrypt=yes;TrustServerCertificate=yes" if req.odbc_driver == "ODBC Driver 18 for SQL Server" else ""
+    )
+
+    # SERVER and DATABASE are brace-wrapped so that embedded semicolons or '=' characters
+    # cannot inject additional key-value pairs into the connection string.  A literal '}'
+    # inside a brace-wrapped value must be escaped as '}}'; host names and DB names are
+    # unlikely to contain '}', but we escape defensively.
+    host = resolved_host.replace("}", "}}")
+    db = req.db_name.replace("}", "}}")
+    uid = req.sysadmin_user.replace("}", "}}")
+    pwd = req.sysadmin_password.replace("}", "}}")
+    conn_str = (
+        f"DRIVER={{{req.odbc_driver}}};"
+        f"SERVER={{{host}}},{req.db_port};"
+        f"DATABASE={{{db}}};"
+        f"UID={{{uid}}};"
+        f"PWD={{{pwd}}}" + encrypt_clause
+    )
+
+    sql = _load_deploy_sql(req.db_schema)
+
+    # The SQL script manages its own transaction (BEGIN TRY / BEGIN TRANSACTION /
+    # COMMIT / CATCH / ROLLBACK / THROW).  Run with autocommit=True so no outer
+    # transaction wraps the call — nested transactions in SQL Server are not true
+    # nesting and would interfere with the proc's own ROLLBACK on failure.
+    with pyodbc.connect(conn_str, timeout=30) as conn:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute(sql)
+
+
 @router.post("/create-mssql-db")
 async def create_mssql_db(req: MssqlCreateDbRequest):
     """
@@ -177,7 +283,7 @@ async def create_mssql_db(req: MssqlCreateDbRequest):
     grants, then returns app-login credentials so the caller can proceed with
     the normal setup flow.  Sysadmin credentials are NOT persisted.
     """
-    if core_config_exists():
+    if _is_setup_fully_complete():
         raise HTTPException(status_code=403, detail="Setup already complete.")
 
     resolved_host = resolve_hostname(req.db_host, use_localhost_alias=req.use_localhost_alias)
@@ -275,6 +381,17 @@ async def create_mssql_db(req: MssqlCreateDbRequest):
             "odbc_driver": req.odbc_driver,
             "use_localhost_alias": req.use_localhost_alias,
         },
+        # Non-secret sysadmin connection params returned so the frontend can pass them
+        # back to the deploy-schema endpoint.  Sysadmin credentials are NOT included here —
+        # the frontend holds them in memory from the form and appends them before the request.
+        "sysadmin_connection": {
+            "db_host": req.db_host,
+            "db_port": req.db_port,
+            "db_name": req.new_db_name,
+            "schema": req.db_schema,
+            "odbc_driver": req.odbc_driver,
+            "use_localhost_alias": req.use_localhost_alias,
+        },
     }
 
 
@@ -315,16 +432,17 @@ async def create_postgres_db(req: PgCreateDbRequest):
     """
     PostgreSQL create-new-database path.
 
-    Only callable before setup is complete — once the core config exists this
-    endpoint returns 403 so it cannot be used as a post-install relay for
-    arbitrary superuser credentials.
+    Only callable before setup is fully complete — returns 403 once all three
+    setup steps are done, so it cannot be used as a post-install relay for
+    arbitrary superuser credentials.  A partially-complete setup (config saved
+    but schema not yet deployed) is allowed through so the user can recover.
 
     Connects with superuser credentials, creates the target database and a
     restricted application user, then returns the app-user credentials so the
     caller can proceed with the normal setup flow.  Superuser credentials are
     NOT persisted anywhere after this request completes.
     """
-    if core_config_exists():
+    if _is_setup_fully_complete():
         raise HTTPException(status_code=403, detail="Setup already complete.")
 
     resolved_host = resolve_hostname(req.db_host, use_localhost_alias=req.use_localhost_alias)
@@ -490,17 +608,23 @@ def check_deploy_status():
 def trigger_deploy_schema(
     force: bool = False,
     credentials: HTTPAuthorizationCredentials | None = Depends(_optional_bearer),
+    body: Optional[SysadminDeployRequest] = Body(default=None),
 ):
     """
     Deploy the core schema.
 
-    `force=false` (default): no-op if already deployed; safe to call without
-    authentication during the initial setup wizard flow.
+    `force=false`, no body (default): deploys via the stored app-login engine; no-op
+    if already deployed.  Safe to call without authentication during the initial setup
+    wizard flow after the core config has been saved.
 
-    `force=true`: re-deploys even when the schema already exists (disaster-
-    recovery path). Requires a valid SystemAdmin JWT because the schema can
-    only be deployed at this point, meaning setup was previously completed and
-    an authenticated admin is making a deliberate decision to overwrite it.
+    `force=false`, body provided (sysadmin path): deploys via sysadmin credentials
+    supplied in the request body.  Accepted while setup is not yet fully complete
+    (e.g. config saved but schema not yet deployed).  Rejected with 403 once all
+    three setup steps are done.  No token required; sysadmin credentials are never
+    persisted.
+
+    `force=true`: re-deploys even when the schema already exists (disaster-recovery
+    path).  Requires a valid SystemAdmin JWT.  Body is ignored for this path.
     """
     if force:
         if credentials is None:
@@ -508,6 +632,22 @@ def trigger_deploy_schema(
         user = verify_token_string(credentials.credentials)
         if "SystemAdmin" not in user.get("roles", []):
             raise HTTPException(status_code=403, detail="SystemAdmin role required for force re-deploy")
+
+    # Pre-config-save sysadmin deploy path.
+    if body is not None and not force:
+        if _is_setup_fully_complete():
+            raise HTTPException(
+                status_code=403,
+                detail="Sysadmin deploy credentials are only accepted before setup is fully complete.",
+            )
+        try:
+            _deploy_via_sysadmin(body)
+        except pyodbc.Error as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            logger.error("[deploy-schema sysadmin] Unexpected error: %s", e)
+            raise HTTPException(status_code=500, detail=str(e))
+        return {"message": "Schema deployed successfully."}
 
     try:
         from app.utils.db_helpers import get_backend  # noqa: PLC0415
