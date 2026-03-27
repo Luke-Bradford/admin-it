@@ -1199,6 +1199,8 @@ export default function SetupPage() {
 
   // null = still loading, number = current step (1-based)
   const [step, setStep] = useState(null);
+  // Error surfaced during initial status check (shown above the step card)
+  const [initError, setInitError] = useState(null);
   // Saved connection data — populated after step 1 completes
   const [savedConnection, setSavedConnection] = useState(null);
 
@@ -1266,8 +1268,10 @@ export default function SetupPage() {
 
         // SystemAdmin re-entering setup — send back to dashboard (nothing to do).
         redirectToDashboard();
-      } catch {
-        // If the setup check itself fails, show step 1 so the user can try.
+      } catch (e) {
+        // Surface the error above the step card so the user knows why they
+        // landed on step 1 rather than where they expected.
+        setInitError(e.message ?? 'An error occurred checking setup status.');
         setStep(1);
       }
     }
@@ -1351,6 +1355,11 @@ export default function SetupPage() {
 
             {/* Step card */}
             <div className="bg-white shadow-sm border border-gray-200 rounded-lg p-6">
+              {initError && (
+                <div className="mb-4 rounded border border-danger-200 bg-danger-50 px-3 py-2 text-sm text-danger-700">
+                  {initError}
+                </div>
+              )}
               <h2 className="text-base font-semibold text-gray-900 mb-5">
                 Step {step} of {STEPS.length} — {STEPS[step - 1].label}
               </h2>
