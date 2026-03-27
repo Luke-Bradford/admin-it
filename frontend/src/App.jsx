@@ -12,23 +12,20 @@ import ProfilePage from './pages/ProfilePage';
 import Layout from './components/Layout';
 import AppShell from './components/AppShell';
 import ProtectedSetupRoute from './components/ProtectedSetupRoute';
+import { isSetupComplete } from './utils/setupStatus';
 
 function HomeLoader() {
-  const [status, setStatus] = useState({ loading: true });
+  // null = loading, true = fully complete, false = setup still needed
+  const [complete, setComplete] = useState(null);
 
   useEffect(() => {
-    fetch('/api/setup')
-      .then((r) => r.json())
-      .then((json) => setStatus({ loading: false, configured: json.configured }))
-      .catch(() => setStatus({ loading: false, configured: false }));
+    isSetupComplete()
+      .then(setComplete)
+      .catch(() => setComplete(false));
   }, []);
 
-  if (status.loading) return <div>Loading…</div>;
-  return status.configured ? (
-    <Navigate to="/dashboard" replace />
-  ) : (
-    <Navigate to="/setup" replace />
-  );
+  if (complete === null) return <div>Loading…</div>;
+  return complete ? <Navigate to="/dashboard" replace /> : <Navigate to="/setup" replace />;
 }
 
 function ComingSoon({ title }) {
