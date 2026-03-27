@@ -26,5 +26,5 @@ export async function isSetupComplete() {
   const adminRes = await fetch('/api/setup/admin-status');
   if (!adminRes.ok) throw new Error('Failed to check admin user status.');
   const admin = await adminRes.json();
-  return admin.present === true;
+  return !!admin.present;
 }
