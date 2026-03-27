@@ -338,6 +338,10 @@ function StepConnection({ onSaved, initial }) {
   }
 
   async function handleCreateMssqlAndSave() {
+    if (!form.host) {
+      setFeedback({ type: 'error', message: 'Host is required.' });
+      return;
+    }
     if (!form.sysadminUser) {
       setFeedback({ type: 'error', message: 'Sysadmin username is required.' });
       return;

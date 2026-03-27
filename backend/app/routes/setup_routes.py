@@ -118,6 +118,12 @@ class PgCreateDbRequest(BaseModel):
         return _ident(v, "schema")
 
 
+# Accepted ODBC driver names for SQL Server.  Used both by MssqlCreateDbRequest
+# validation and by the encrypt_clause detection — validating against this list
+# makes the "18" substring check safe.
+_MSSQL_ODBC_DRIVERS = frozenset(["ODBC Driver 17 for SQL Server", "ODBC Driver 18 for SQL Server"])
+
+
 class MssqlCreateDbRequest(BaseModel):
     db_host: str
     db_port: int = 1433
@@ -147,6 +153,13 @@ class MssqlCreateDbRequest(BaseModel):
     def validate_db_schema(cls, v: str) -> str:
         return _ident(v, "schema")
 
+    @field_validator("odbc_driver")
+    @classmethod
+    def validate_odbc_driver(cls, v: str) -> str:
+        if v not in _MSSQL_ODBC_DRIVERS:
+            raise ValueError(f"odbc_driver must be one of: {', '.join(sorted(_MSSQL_ODBC_DRIVERS))}")
+        return v
+
 
 @router.post("/create-mssql-db")
 async def create_mssql_db(req: MssqlCreateDbRequest):
@@ -169,32 +182,30 @@ async def create_mssql_db(req: MssqlCreateDbRequest):
 
     db = _bracket(req.new_db_name)
     schema = _bracket(req.db_schema)
-    login = _bracket(req.app_login)
-    user = _bracket(req.app_login)  # DB user has same name as login
+    login = _bracket(req.app_login)  # DB user has same name as login
 
+    # odbc_driver validated against _MSSQL_ODBC_DRIVERS allowlist — "18" substring check is safe.
     encrypt_clause = ";Encrypt=yes;TrustServerCertificate=yes" if "18" in req.odbc_driver else ""
 
-    def _master_cs() -> str:
+    # UID and PWD values are brace-wrapped per the ODBC connection string spec so that
+    # values containing ';', '=', or '}' cannot break the key=value structure or inject
+    # additional connection-string attributes.  A literal '}' inside a brace-wrapped
+    # value must be escaped as '}}'; sysadmin_user/password are plain str with no
+    # further restriction — the braces are the sole defence here.
+    def _cs(database: str) -> str:
+        uid = req.sysadmin_user.replace("}", "}}")
+        pwd = req.sysadmin_password.replace("}", "}}")
         return (
             f"DRIVER={{{req.odbc_driver}}};"
             f"SERVER={resolved_host},{req.db_port};"
-            f"DATABASE=master;"
-            f"UID={req.sysadmin_user};"
-            f"PWD={req.sysadmin_password}" + encrypt_clause
-        )
-
-    def _db_cs() -> str:
-        return (
-            f"DRIVER={{{req.odbc_driver}}};"
-            f"SERVER={resolved_host},{req.db_port};"
-            f"DATABASE={req.new_db_name};"
-            f"UID={req.sysadmin_user};"
-            f"PWD={req.sysadmin_password}" + encrypt_clause
+            f"DATABASE={database};"
+            f"UID={{{uid}}};"
+            f"PWD={{{pwd}}}" + encrypt_clause
         )
 
     try:
         # --- Step 1: connect to master, create the database and login ---
-        with pyodbc.connect(_master_cs(), timeout=10) as master_conn:
+        with pyodbc.connect(_cs("master"), timeout=10) as master_conn:
             master_conn.autocommit = True
             with master_conn.cursor() as cur:
                 # Create database (idempotent)
@@ -211,7 +222,7 @@ async def create_mssql_db(req: MssqlCreateDbRequest):
                 )
 
         # --- Step 2: connect to the new database, create DB user and grant permissions ---
-        with pyodbc.connect(_db_cs(), timeout=10) as db_conn:
+        with pyodbc.connect(_cs(req.new_db_name), timeout=10) as db_conn:
             db_conn.autocommit = True
             with db_conn.cursor() as cur:
                 # Create schema (idempotent)
@@ -225,18 +236,19 @@ async def create_mssql_db(req: MssqlCreateDbRequest):
                     IF NOT EXISTS (
                         SELECT 1 FROM sys.database_principals WHERE name = N'{req.app_login}'
                     )
-                    CREATE USER {user} FOR LOGIN {login}
+                    CREATE USER {login} FOR LOGIN {login}
                     """
                 )
                 # Grant least-privilege permissions on the schema
-                cur.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::{schema} TO {user}")
-                cur.execute(f"GRANT CREATE TABLE TO {user}")
-                cur.execute(f"GRANT ALTER ON SCHEMA::{schema} TO {user}")
+                cur.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::{schema} TO {login}")
+                cur.execute(f"GRANT CREATE TABLE TO {login}")
+                cur.execute(f"GRANT ALTER ON SCHEMA::{schema} TO {login}")
 
     except pyodbc.Error as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("[create-mssql-db] Unexpected error: %s", e)
+        raise HTTPException(status_code=500, detail="An unexpected error occurred. Check server logs.")
 
     return {
         "status": "success",
