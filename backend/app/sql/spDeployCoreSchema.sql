@@ -5,11 +5,16 @@ DECLARE @crlf NVARCHAR(2) = CHAR(13) + CHAR(10);
 
 SET NOCOUNT ON;
 
--- Create schema if missing
+-- Create schema if missing.
+-- Must run before the transaction: CREATE SCHEMA cannot run inside a
+-- multi-statement transaction that also creates tables in the same schema.
 IF NOT EXISTS (SELECT * FROM sys.schemas WHERE name = @SchemaName)
 BEGIN
     EXEC('CREATE SCHEMA [' + @SchemaName + ']');
 END;
+
+BEGIN TRY
+BEGIN TRANSACTION;
 
 -------------------------------------
 -- USERS table with temporal support
@@ -345,3 +350,14 @@ BEGIN
 END
 ';
 EXEC sp_executesql @trig;
+
+COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0
+        ROLLBACK TRANSACTION;
+    DECLARE @ErrMsg NVARCHAR(4000) = ERROR_MESSAGE();
+    DECLARE @ErrSev INT = ERROR_SEVERITY();
+    DECLARE @ErrState INT = ERROR_STATE();
+    RAISERROR(@ErrMsg, @ErrSev, @ErrState);
+END CATCH;
