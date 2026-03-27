@@ -839,7 +839,7 @@ function StepConnection({ onSaved, onPendingMssql, initial }) {
         )}
         {isCreateMode && !isPostgres && (
           <Button type="button" variant="secondary" onClick={handleTestSysadmin} disabled={loading}>
-            {loading ? <Spinner className="w-4 h-4" /> : 'Test connection'}
+            {loading ? <Spinner className="w-4 h-4" /> : 'Test sysadmin connection'}
           </Button>
         )}
         <Button
