@@ -251,6 +251,8 @@ async def create_mssql_db(req: MssqlCreateDbRequest):
                 )
                 # Grant least-privilege permissions on the schema
                 cur.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::{schema} TO {login}")
+                # REFERENCES is needed to create foreign keys referencing tables in this schema.
+                cur.execute(f"GRANT REFERENCES ON SCHEMA::{schema} TO {login}")
                 cur.execute(f"GRANT CREATE TABLE TO {login}")
                 cur.execute(f"GRANT ALTER ON SCHEMA::{schema} TO {login}")
 
