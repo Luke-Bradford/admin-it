@@ -70,6 +70,7 @@ function Feedback({ message, type }) {
 
 const DEFAULT_MSSQL_FORM = {
   dbType: 'mssql',
+  mssqlMode: 'existing', // 'existing' | 'create'
   pgMode: null,
   host: '',
   useLocalhostAlias: false,
@@ -79,6 +80,12 @@ const DEFAULT_MSSQL_FORM = {
   database: '',
   schema: 'adm',
   driver: ODBC_DRIVERS[0],
+  // create-new fields
+  sysadminUser: '',
+  sysadminPassword: '',
+  newDatabase: '',
+  appLogin: 'adminit_app',
+  appLoginPassword: '',
 };
 
 const DEFAULT_PG_FORM = {
@@ -179,6 +186,21 @@ function StepConnection({ onSaved, initial }) {
     };
   }
 
+  function buildCreateMssqlDbPayload() {
+    return {
+      db_host: form.host,
+      db_port: parseInt(form.port, 10) || 1433,
+      sysadmin_user: form.sysadminUser,
+      sysadmin_password: form.sysadminPassword,
+      new_db_name: form.newDatabase,
+      app_login: form.appLogin,
+      app_login_password: form.appLoginPassword,
+      schema: form.schema,
+      odbc_driver: form.driver,
+      use_localhost_alias: form.useLocalhostAlias,
+    };
+  }
+
   // Only called from the Discover button, which is only rendered in !isCreateMode.
   // form.user / form.password are therefore always populated when this runs.
   function buildDiscoverPayload() {
@@ -209,7 +231,13 @@ function StepConnection({ onSaved, initial }) {
       if (!res.ok) throw new Error(body.detail ?? 'Failed to list databases.');
       setAvailableDatabases(body.databases ?? []);
       if ((body.databases ?? []).length === 0) {
-        setFeedback({ type: 'error', message: 'No databases found. Check credentials and host.' });
+        setFeedback({
+          type: 'error',
+          message:
+            form.dbType === 'mssql'
+              ? "No databases found. You can create a new one using the 'Create new database' option above."
+              : 'No databases found. Check credentials and host.',
+        });
       }
     } catch (e) {
       setFeedback({ type: 'error', message: e.message });
@@ -309,8 +337,57 @@ function StepConnection({ onSaved, initial }) {
     }
   }
 
+  async function handleCreateMssqlAndSave() {
+    if (!form.sysadminUser) {
+      setFeedback({ type: 'error', message: 'Sysadmin username is required.' });
+      return;
+    }
+    if (!form.sysadminPassword) {
+      setFeedback({ type: 'error', message: 'Sysadmin password is required.' });
+      return;
+    }
+    if (!form.newDatabase) {
+      setFeedback({ type: 'error', message: 'New database name is required.' });
+      return;
+    }
+    if (!form.appLogin) {
+      setFeedback({ type: 'error', message: 'App login name is required.' });
+      return;
+    }
+    if (!form.appLoginPassword) {
+      setFeedback({ type: 'error', message: 'App login password is required.' });
+      return;
+    }
+    setLoading(true);
+    setFeedback(null);
+    try {
+      const createRes = await fetch('/api/setup/create-mssql-db', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildCreateMssqlDbPayload()),
+      });
+      const createBody = await createRes.json();
+      if (!createRes.ok) throw new Error(createBody.detail ?? 'Failed to create database.');
+
+      const connDetails = { ...createBody.connection, db_password: form.appLoginPassword };
+      const saveRes = await fetch('/api/setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(connDetails),
+      });
+      const saveBody = await saveRes.json();
+      if (!saveRes.ok) throw new Error(saveBody.detail ?? saveBody.message ?? 'Save failed.');
+      onSaved(saveBody.connection);
+    } catch (e) {
+      setFeedback({ type: 'error', message: e.message });
+    } finally {
+      setLoading(false);
+    }
+  }
+
   const isPostgres = form.dbType === 'postgres';
-  const isCreateMode = isPostgres && form.pgMode === 'create';
+  const isCreateMode =
+    (isPostgres && form.pgMode === 'create') || (!isPostgres && form.mssqlMode === 'create');
 
   return (
     <div className="space-y-5">
@@ -337,6 +414,38 @@ function StepConnection({ onSaved, initial }) {
           ))}
         </div>
       </div>
+
+      {/* SQL Server mode selector (existing vs create new) */}
+      {!isPostgres && (
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Setup mode</label>
+          <div className="flex gap-3">
+            {[
+              { value: 'existing', label: 'Connect to existing database' },
+              { value: 'create', label: 'Create new database' },
+            ].map(({ value, label }) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => set('mssqlMode', value)}
+                className={`flex-1 rounded-md border px-4 py-2.5 text-sm font-medium transition-colors ${
+                  form.mssqlMode === value
+                    ? 'border-brand-600 bg-brand-50 text-brand-700'
+                    : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {form.mssqlMode === 'create' && (
+            <p className="mt-2 text-xs text-gray-400">
+              AdminIT will create the database and a restricted app login. Sysadmin credentials are
+              not stored after setup completes.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* PostgreSQL mode selector (existing vs create new) */}
       {isPostgres && (
@@ -423,94 +532,194 @@ function StepConnection({ onSaved, initial }) {
         </p>
       </div>
 
-      {/* Existing-DB credentials (both modes show these, but create-mode uses them as superuser) */}
+      {/* Credentials section — varies by db type and mode */}
       {isCreateMode ? (
-        /* Create-new mode: superuser credentials + new database details */
-        <>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Superuser <span className="text-danger-600">*</span>
-              </label>
-              <Input
-                type="text"
-                required
-                value={form.superuser}
-                onChange={(e) => set('superuser', e.target.value)}
-                placeholder="postgres"
-                autoComplete="username"
-              />
+        isPostgres ? (
+          /* PostgreSQL create-new: superuser + new db + app user */
+          <>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Superuser <span className="text-danger-600">*</span>
+                </label>
+                <Input
+                  type="text"
+                  required
+                  value={form.superuser}
+                  onChange={(e) => set('superuser', e.target.value)}
+                  placeholder="postgres"
+                  autoComplete="username"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Superuser password <span className="text-danger-600">*</span>
+                </label>
+                <Input
+                  type="password"
+                  required
+                  value={form.superuserPassword}
+                  onChange={(e) => set('superuserPassword', e.target.value)}
+                  autoComplete="current-password"
+                />
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Superuser password <span className="text-danger-600">*</span>
-              </label>
-              <Input
-                type="password"
-                required
-                value={form.superuserPassword}
-                onChange={(e) => set('superuserPassword', e.target.value)}
-                autoComplete="current-password"
-              />
-            </div>
-          </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                New database name <span className="text-danger-600">*</span>
-              </label>
-              <Input
-                type="text"
-                required
-                value={form.newDatabase}
-                onChange={(e) => set('newDatabase', e.target.value)}
-                placeholder="adminit"
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  New database name <span className="text-danger-600">*</span>
+                </label>
+                <Input
+                  type="text"
+                  required
+                  value={form.newDatabase}
+                  onChange={(e) => set('newDatabase', e.target.value)}
+                  placeholder="adminit"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Schema name</label>
+                <Input
+                  type="text"
+                  value={form.schema}
+                  onChange={(e) => set('schema', e.target.value)}
+                />
+                <p className="mt-1 text-xs text-gray-400">
+                  Default: <code className="bg-gray-100 px-1 rounded">adm</code>
+                </p>
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Schema name</label>
-              <Input
-                type="text"
-                value={form.schema}
-                onChange={(e) => set('schema', e.target.value)}
-              />
-              <p className="mt-1 text-xs text-gray-400">
-                Default: <code className="bg-gray-100 px-1 rounded">adm</code>
-              </p>
-            </div>
-          </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                App username <span className="text-danger-600">*</span>
-              </label>
-              <Input
-                type="text"
-                required
-                value={form.appUser}
-                onChange={(e) => set('appUser', e.target.value)}
-                placeholder="adminit_app"
-              />
-              <p className="mt-1 text-xs text-gray-400">
-                A restricted database user created for AdminIT.
-              </p>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  App username <span className="text-danger-600">*</span>
+                </label>
+                <Input
+                  type="text"
+                  required
+                  value={form.appUser}
+                  onChange={(e) => set('appUser', e.target.value)}
+                  placeholder="adminit_app"
+                />
+                <p className="mt-1 text-xs text-gray-400">
+                  A restricted database user created for AdminIT.
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  App user password <span className="text-danger-600">*</span>
+                </label>
+                <Input
+                  type="password"
+                  required
+                  value={form.appUserPassword}
+                  onChange={(e) => set('appUserPassword', e.target.value)}
+                  autoComplete="new-password"
+                />
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                App user password <span className="text-danger-600">*</span>
-              </label>
-              <Input
-                type="password"
-                required
-                value={form.appUserPassword}
-                onChange={(e) => set('appUserPassword', e.target.value)}
-                autoComplete="new-password"
-              />
+          </>
+        ) : (
+          /* SQL Server create-new: sysadmin + new db + app login */
+          <>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Sysadmin username <span className="text-danger-600">*</span>
+                </label>
+                <Input
+                  type="text"
+                  required
+                  value={form.sysadminUser}
+                  onChange={(e) => set('sysadminUser', e.target.value)}
+                  placeholder="sa"
+                  autoComplete="username"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Sysadmin password <span className="text-danger-600">*</span>
+                </label>
+                <Input
+                  type="password"
+                  required
+                  value={form.sysadminPassword}
+                  onChange={(e) => set('sysadminPassword', e.target.value)}
+                  autoComplete="current-password"
+                />
+              </div>
             </div>
-          </div>
-        </>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  New database name <span className="text-danger-600">*</span>
+                </label>
+                <Input
+                  type="text"
+                  required
+                  value={form.newDatabase}
+                  onChange={(e) => set('newDatabase', e.target.value)}
+                  placeholder="adminit"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Schema name</label>
+                <Input
+                  type="text"
+                  value={form.schema}
+                  onChange={(e) => set('schema', e.target.value)}
+                />
+                <p className="mt-1 text-xs text-gray-400">
+                  Default: <code className="bg-gray-100 px-1 rounded">adm</code>
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  App login name <span className="text-danger-600">*</span>
+                </label>
+                <Input
+                  type="text"
+                  required
+                  value={form.appLogin}
+                  onChange={(e) => set('appLogin', e.target.value)}
+                  placeholder="adminit_app"
+                />
+                <p className="mt-1 text-xs text-gray-400">
+                  A restricted SQL login created for AdminIT.
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  App login password <span className="text-danger-600">*</span>
+                </label>
+                <Input
+                  type="password"
+                  required
+                  value={form.appLoginPassword}
+                  onChange={(e) => set('appLoginPassword', e.target.value)}
+                  autoComplete="new-password"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">ODBC driver</label>
+              <Select value={form.driver} onChange={(e) => set('driver', e.target.value)}>
+                {ODBC_DRIVERS.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </>
+        )
       ) : (
         /* Existing-DB mode: normal credentials */
         <>
@@ -613,7 +822,13 @@ function StepConnection({ onSaved, initial }) {
         )}
         <Button
           type="button"
-          onClick={isCreateMode ? handleCreateAndSave : handleSaveExisting}
+          onClick={
+            isCreateMode
+              ? isPostgres
+                ? handleCreateAndSave
+                : handleCreateMssqlAndSave
+              : handleSaveExisting
+          }
           disabled={loading}
         >
           {loading ? (

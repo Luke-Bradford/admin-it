@@ -69,17 +69,24 @@ class AdminUserInput(BaseModel):
     password: str
 
 
-# Allowlist for PostgreSQL identifiers used in DDL.  Restricts to characters
-# that are safe in both libpq connection strings (dbname=, user=) and as SQL
-# identifiers, making psycopg2.sql.Identifier belt-and-suspenders rather than
-# the sole safety net.
-_PG_IDENT_RE = re.compile(r"^[A-Za-z0-9_]+$")
+# Allowlist for SQL identifiers used in DDL.  Restricts to characters that are
+# safe in both connection string parameters and as quoted SQL identifiers.
+# Applied to all user-supplied DDL names (databases, schemas, logins) before
+# use in any dynamic SQL, even when bracket/double-quote quoting is also applied.
+_IDENT_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 
-def _pg_ident(value: str, field: str) -> str:
-    if not _PG_IDENT_RE.match(value):
+def _ident(value: str, field: str) -> str:
+    if not _IDENT_RE.match(value):
         raise ValueError(f"{field} must contain only letters, digits, and underscores")
     return value
+
+
+def _bracket(name: str) -> str:
+    """Return a SQL Server bracket-quoted identifier.  The name must already
+    have passed _ident() validation — brackets alone are not sufficient because
+    a closing bracket in the name would break out of the quoted context."""
+    return f"[{name}]"
 
 
 class PgCreateDbRequest(BaseModel):
@@ -98,17 +105,153 @@ class PgCreateDbRequest(BaseModel):
     @field_validator("new_db_name")
     @classmethod
     def validate_new_db_name(cls, v: str) -> str:
-        return _pg_ident(v, "new_db_name")
+        return _ident(v, "new_db_name")
 
     @field_validator("app_user")
     @classmethod
     def validate_app_user(cls, v: str) -> str:
-        return _pg_ident(v, "app_user")
+        return _ident(v, "app_user")
 
     @field_validator("db_schema", mode="before")
     @classmethod
     def validate_db_schema(cls, v: str) -> str:
-        return _pg_ident(v, "schema")
+        return _ident(v, "schema")
+
+
+class MssqlCreateDbRequest(BaseModel):
+    db_host: str
+    db_port: int = 1433
+    sysadmin_user: str
+    sysadmin_password: str
+    new_db_name: str
+    app_login: str = "adminit_app"
+    app_login_password: str
+    db_schema: str = Field("adm", alias="schema")
+    odbc_driver: str = "ODBC Driver 17 for SQL Server"
+    use_localhost_alias: bool = False
+
+    model_config = {"populate_by_name": True}
+
+    @field_validator("new_db_name")
+    @classmethod
+    def validate_new_db_name(cls, v: str) -> str:
+        return _ident(v, "new_db_name")
+
+    @field_validator("app_login")
+    @classmethod
+    def validate_app_login(cls, v: str) -> str:
+        return _ident(v, "app_login")
+
+    @field_validator("db_schema", mode="before")
+    @classmethod
+    def validate_db_schema(cls, v: str) -> str:
+        return _ident(v, "schema")
+
+
+@router.post("/create-mssql-db")
+async def create_mssql_db(req: MssqlCreateDbRequest):
+    """
+    SQL Server create-new-database path.
+
+    Only callable before setup is complete — once the core config exists this
+    endpoint returns 403.
+
+    Connects with sysadmin credentials to the master database, creates the target
+    database, creates a SQL login scoped to that database with least-privilege
+    grants, then returns app-login credentials so the caller can proceed with
+    the normal setup flow.  Sysadmin credentials are NOT persisted.
+    """
+    if core_config_exists():
+        raise HTTPException(status_code=403, detail="Setup already complete.")
+
+    resolved_host = resolve_hostname(req.db_host, use_localhost_alias=req.use_localhost_alias)
+    logger.debug("[create-mssql-db] Using resolved host: %s", resolved_host)
+
+    db = _bracket(req.new_db_name)
+    schema = _bracket(req.db_schema)
+    login = _bracket(req.app_login)
+    user = _bracket(req.app_login)  # DB user has same name as login
+
+    encrypt_clause = ";Encrypt=yes;TrustServerCertificate=yes" if "18" in req.odbc_driver else ""
+
+    def _master_cs() -> str:
+        return (
+            f"DRIVER={{{req.odbc_driver}}};"
+            f"SERVER={resolved_host},{req.db_port};"
+            f"DATABASE=master;"
+            f"UID={req.sysadmin_user};"
+            f"PWD={req.sysadmin_password}" + encrypt_clause
+        )
+
+    def _db_cs() -> str:
+        return (
+            f"DRIVER={{{req.odbc_driver}}};"
+            f"SERVER={resolved_host},{req.db_port};"
+            f"DATABASE={req.new_db_name};"
+            f"UID={req.sysadmin_user};"
+            f"PWD={req.sysadmin_password}" + encrypt_clause
+        )
+
+    try:
+        # --- Step 1: connect to master, create the database and login ---
+        with pyodbc.connect(_master_cs(), timeout=10) as master_conn:
+            master_conn.autocommit = True
+            with master_conn.cursor() as cur:
+                # Create database (idempotent)
+                cur.execute(f"IF DB_ID(N'{req.new_db_name}') IS NULL CREATE DATABASE {db}")
+                # Create login (idempotent)
+                cur.execute(
+                    f"""
+                    IF NOT EXISTS (
+                        SELECT 1 FROM sys.server_principals WHERE name = N'{req.app_login}'
+                    )
+                    CREATE LOGIN {login} WITH PASSWORD = ?
+                    """,
+                    req.app_login_password,
+                )
+
+        # --- Step 2: connect to the new database, create DB user and grant permissions ---
+        with pyodbc.connect(_db_cs(), timeout=10) as db_conn:
+            db_conn.autocommit = True
+            with db_conn.cursor() as cur:
+                # Create schema (idempotent)
+                cur.execute(
+                    f"IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = N'{req.db_schema}') "
+                    f"EXEC('CREATE SCHEMA {schema}')"
+                )
+                # Create DB user mapped to the login (idempotent)
+                cur.execute(
+                    f"""
+                    IF NOT EXISTS (
+                        SELECT 1 FROM sys.database_principals WHERE name = N'{req.app_login}'
+                    )
+                    CREATE USER {user} FOR LOGIN {login}
+                    """
+                )
+                # Grant least-privilege permissions on the schema
+                cur.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::{schema} TO {user}")
+                cur.execute(f"GRANT CREATE TABLE TO {user}")
+                cur.execute(f"GRANT ALTER ON SCHEMA::{schema} TO {user}")
+
+    except pyodbc.Error as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return {
+        "status": "success",
+        "message": f"Database '{req.new_db_name}' created with login '{req.app_login}'.",
+        "connection": {
+            "db_type": "mssql",
+            "db_host": req.db_host,
+            "db_port": req.db_port,
+            "db_name": req.new_db_name,
+            "db_user": req.app_login,
+            "schema": req.db_schema,
+            "odbc_driver": req.odbc_driver,
+            "use_localhost_alias": req.use_localhost_alias,
+        },
+    }
 
 
 @router.post("/test-connection")
