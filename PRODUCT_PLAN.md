@@ -351,6 +351,46 @@ This gives the same query interface as the SQL Server audit log — the audit UI
 
 ---
 
+#### #88 — Auto-detect ODBC driver; fix SSL connection string brace-wrapping ✅ done
+**Size:** S
+**Persona:** System admin
+**Problem:** Schema deployment via sysadmin path failed with an SSL certificate error. Root cause: `_deploy_via_sysadmin` brace-wrapped the `SERVER` and `DATABASE` fields in the ODBC connection string. ODBC drivers only expect braces around `UID`/`PWD` values — bracing `SERVER={hostname}` caused the driver to misparse the string, silently ignoring `TrustServerCertificate=yes`.
+**Fix:** Remove braces from `SERVER` and `DATABASE`. Auto-detect the best available ODBC driver on the backend (`_best_odbc_driver()`: prefers Driver 18, falls back to 17) rather than accepting it from the client. Removed the ODBC driver selector from the setup UI entirely. Added "Test sysadmin connection" button to the MSSQL create-new form.
+
+---
+
+#### #86 — Deploy MSSQL schema as sysadmin; save app-login config after deploy ✅ done
+**Size:** M
+**Persona:** System admin
+**Problem:** Schema deployment ran as the restricted `adminit_app` login, which lacked the privileges to create foreign keys (`REFERENCES` permission denied). A failed deploy also left the system in a half-configured state (config saved, schema not deployed) with no clean recovery path.
+**Fix:** New `POST /api/setup/deploy-schema` body path accepts sysadmin credentials (only pre-config-save; 403 once setup is complete). Schema deployed with sysadmin privileges. App-login config saved only after schema deploy succeeds. `create-mssql-db` and `create-postgres-db` gate on `_is_setup_fully_complete()` instead of `core_config_exists()` so partial setup never blocks recovery.
+
+---
+
+#### #85 — Three-step setup check in routing guards ✅ done
+**Size:** S
+**Persona:** System admin
+**Problem:** `HomeLoader` and `ProtectedSetupRoute` treated `configured=true` as fully done, redirecting to `/login` even when schema wasn't deployed yet. User was locked out mid-setup.
+**Fix:** Shared `isSetupComplete()` helper checks all three steps (config saved + schema deployed + admin user present). Both routing guards use it.
+
+---
+
+#### #84 — Grant REFERENCES on schema to app login ✅ done
+**Size:** S
+**Persona:** System admin
+**Problem:** `CREATE FOREIGN KEY` failed during schema deployment — the app login lacked `REFERENCES` permission.
+**Fix:** Added `GRANT REFERENCES ON SCHEMA::{schema} TO {login}` in `create_mssql_db`.
+
+---
+
+#### #83 — Resume setup without auth when schema/admin not yet deployed ✅ done
+**Size:** S
+**Persona:** System admin
+**Problem:** Setup wizard redirected to `/login` instead of the correct setup step when config was saved but schema/admin wasn't yet deployed.
+**Fix:** `determineStep()` checks deploy and admin status before requiring a token. Steps 2 and 3 reachable without authentication during first-time setup.
+
+---
+
 #### #82 — Fix: CREATE TRIGGER must be first statement in its batch ✅ done
 **Size:** S
 **Persona:** System admin
@@ -543,6 +583,7 @@ This gives the same query interface as the SQL Server audit log — the audit UI
 
 ## Immediate next actions (in order)
 
-Phase 1 hardening is complete. Phase 2 (connection and user management) is done. Phase 1.5 (frontend overhaul) is done. Phase 2.5 setup wizard multi-database support is done (#75, #76, #77, #78, #79, #80, #81, #82 done). Remaining work in priority order:
+Phase 1 hardening complete. Phase 2 (connection and user management) done. Phase 1.5 (frontend overhaul) done. Phase 2.5 setup wizard multi-database support done (#75–#82, #83–#86, #88 done). Setup wizard is fully working end-to-end for both SQL Server (create-new and existing) and PostgreSQL. First-time setup has been successfully completed. Remaining work in priority order:
 
 1. **Phase 3 (data browser)** — the core end-user value — start with #12 (table browser)
+2. **Auth UX improvement** — email as primary login identifier; username as display name only (open ticket)
