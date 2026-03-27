@@ -351,6 +351,22 @@ This gives the same query interface as the SQL Server audit log — the audit UI
 
 ---
 
+#### #80 — Setup wizard: SQL Server create-new database path
+**Size:** M
+**Persona:** System admin
+**Problem:** The SQL Server setup path requires the user to provide an existing database. A System Admin with a fresh SQL Server instance — no user databases, only system databases — has no way to complete setup without first manually creating a database outside of admin-it. This is a dead end with no guidance.
+**Background:** The PostgreSQL path (#78) already supports a "create new database" flow: the user provides superuser credentials, admin-it creates the database and a restricted app user, then deploys the schema. The SQL Server path needs the same option. The key differences: SQL Server uses `CREATE DATABASE` (no template), login/user creation uses `CREATE LOGIN` / `CREATE USER`, and least-privilege grants use `GRANT` on the schema rather than `ALTER DEFAULT PRIVILEGES`.
+**Acceptance criteria:**
+- Step 1 of the setup wizard gains a pgMode-style toggle for SQL Server: **"Use existing database"** (current behaviour) and **"Create new database"**
+- Create-new form fields: database name, schema name (default `adm`), sysadmin username, sysadmin password, app username (default `adminit_app`), app user password
+- Backend `POST /api/setup/create-mssql-db` endpoint: connects with sysadmin credentials, creates the database, creates a contained login scoped to that database, grants least-privilege (SELECT, INSERT, UPDATE, DELETE on schema; CREATE TABLE for schema deployment); sysadmin credentials are not stored after the call completes
+- All identifiers (database name, schema name, usernames) validated against an allowlist regex before use in DDL — no user-controlled strings interpolated without validation
+- On success, the connection details (host, port, database, app username, app password) are returned to the frontend and used for the save/continue flow, matching the PostgreSQL create-new pattern
+- "Discover" button in existing-database mode correctly handles a blank server (no user databases) by showing a clear message: "No databases found. You can create a new one using the 'Create new database' option."
+- Works with both ODBC Driver 17 and ODBC Driver 18 for SQL Server
+
+---
+
 ### Phase 3 — Data browser
 
 ---
@@ -509,4 +525,5 @@ This gives the same query interface as the SQL Server audit log — the audit UI
 
 Phase 1 hardening is complete. Phase 2 (connection and user management) is done. Phase 1.5 (frontend overhaul) is done. Phase 2.5 setup wizard multi-database support is done (#75, #76, #77, #78, #79 done). Remaining work in priority order:
 
-1. **Phase 3 (data browser)** — the core end-user value — start with #12 (table browser)
+1. **#80 — SQL Server create-new database path** — unblocks onboarding on a blank SQL Server instance
+2. **Phase 3 (data browser)** — the core end-user value — start with #12 (table browser)
