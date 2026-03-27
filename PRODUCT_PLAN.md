@@ -351,7 +351,7 @@ This gives the same query interface as the SQL Server audit log — the audit UI
 
 ---
 
-#### #80 — Setup wizard: SQL Server create-new database path
+#### #80 — Setup wizard: SQL Server create-new database path ✅ done
 **Size:** M
 **Persona:** System admin
 **Problem:** The SQL Server setup path requires the user to provide an existing database. A System Admin with a fresh SQL Server instance — no user databases, only system databases — has no way to complete setup without first manually creating a database outside of admin-it. This is a dead end with no guidance.
@@ -525,5 +525,4 @@ This gives the same query interface as the SQL Server audit log — the audit UI
 
 Phase 1 hardening is complete. Phase 2 (connection and user management) is done. Phase 1.5 (frontend overhaul) is done. Phase 2.5 setup wizard multi-database support is done (#75, #76, #77, #78, #79 done). Remaining work in priority order:
 
-1. **#80 — SQL Server create-new database path** — unblocks onboarding on a blank SQL Server instance
-2. **Phase 3 (data browser)** — the core end-user value — start with #12 (table browser)
+1. **Phase 3 (data browser)** — the core end-user value — start with #12 (table browser)
