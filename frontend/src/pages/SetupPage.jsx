@@ -1281,6 +1281,7 @@ export default function SetupPage() {
 
   function handleConnectionSaved(conn) {
     setSavedConnection(conn);
+    setInitError(null);
     setStep(2);
   }
 
