@@ -210,31 +210,42 @@ async def create_mssql_db(req: MssqlCreateDbRequest):
             with master_conn.cursor() as cur:
                 # Create database (idempotent)
                 cur.execute(f"IF DB_ID(N'{req.new_db_name}') IS NULL CREATE DATABASE {db}")
-                # Create login (idempotent)
+                # Create login (idempotent).
+                # SQL Server does not support bind parameters in DDL, so the password
+                # is embedded as a T-SQL string literal.  Single quotes are escaped by
+                # doubling them, which is the standard T-SQL escaping mechanism.
+                # Both the password and the login name are embedded as T-SQL string
+                # literals (SQL Server DDL does not support bind parameters).
+                # Single quotes are escaped by doubling — the only injection vector
+                # in a T-SQL N'...' literal.  _ident() validation on app_login means
+                # it cannot contain single quotes in practice, but we escape anyway
+                # for consistency and defence-in-depth.
+                escaped_pwd = req.app_login_password.replace("'", "''")
+                escaped_login = req.app_login.replace("'", "''")
                 cur.execute(
                     f"""
                     IF NOT EXISTS (
-                        SELECT 1 FROM sys.server_principals WHERE name = N'{req.app_login}'
+                        SELECT 1 FROM sys.server_principals WHERE name = N'{escaped_login}'
                     )
-                    CREATE LOGIN {login} WITH PASSWORD = ?
-                    """,
-                    req.app_login_password,
+                    CREATE LOGIN {login} WITH PASSWORD = N'{escaped_pwd}'
+                    """
                 )
 
         # --- Step 2: connect to the new database, create DB user and grant permissions ---
         with pyodbc.connect(_cs(req.new_db_name), timeout=10) as db_conn:
             db_conn.autocommit = True
             with db_conn.cursor() as cur:
+                escaped_schema = req.db_schema.replace("'", "''")
                 # Create schema (idempotent)
                 cur.execute(
-                    f"IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = N'{req.db_schema}') "
+                    f"IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = N'{escaped_schema}') "
                     f"EXEC('CREATE SCHEMA {schema}')"
                 )
                 # Create DB user mapped to the login (idempotent)
                 cur.execute(
                     f"""
                     IF NOT EXISTS (
-                        SELECT 1 FROM sys.database_principals WHERE name = N'{req.app_login}'
+                        SELECT 1 FROM sys.database_principals WHERE name = N'{escaped_login}'
                     )
                     CREATE USER {login} FOR LOGIN {login}
                     """
