@@ -52,9 +52,10 @@ function SchemaNode({ connectionId, schema, selectedSchema, selectedTable, onSel
   const currentKey = `${connectionId}:${schema}`;
 
   const load = useCallback(() => {
-    if (tables !== null && loadedKeyRef.current === currentKey) {
-      return; // already loaded for this identity
-    }
+    // loadedKeyRef is updated synchronously before the fetch, so this guard
+    // is inherently race-free. Do not add `tables !== null` here — that would
+    // introduce a stale closure dependency since tables is not in the deps array.
+    if (loadedKeyRef.current === currentKey) return; // already loaded for this identity
     // Identity changed or never loaded — reset stale state synchronously.
     setTables(null);
     setError(null);
@@ -187,17 +188,23 @@ function ColumnPanel({ connectionId, schema, table }) {
   const [state, setState] = useState({ loading: true, error: null, columns: null });
 
   useEffect(() => {
+    const controller = new AbortController();
     setState({ loading: true, error: null, columns: null });
     fetch(
       `/api/connections/${connectionId}/schemas/${encodeURIComponent(schema)}/tables/${encodeURIComponent(table.name)}/columns`,
-      { headers: authHeader() }
+      { headers: authHeader(), signal: controller.signal }
     )
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       })
       .then((d) => setState({ loading: false, error: null, columns: d.columns }))
-      .catch((e) => setState({ loading: false, error: e.message, columns: null }));
+      .catch((e) => {
+        if (e.name !== 'AbortError') {
+          setState({ loading: false, error: e.message, columns: null });
+        }
+      });
+    return () => controller.abort();
   }, [connectionId, schema, table.name]);
 
   return (

@@ -243,8 +243,7 @@ def list_columns(
             "FROM INFORMATION_SCHEMA.COLUMNS "
             "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? "
             "ORDER BY ORDINAL_POSITION",
-            schema_name,
-            table_name,
+            (schema_name, table_name),
         )
         rows = cursor.fetchall()
 
