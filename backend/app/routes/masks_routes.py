@@ -124,28 +124,24 @@ def add_mask(connection_id: str, body: MaskIn, user: dict = Depends(verify_token
     _validate_uuid(connection_id, "connection_id")
 
     backend = get_backend()
-
-    # Validate connection exists.
     schema = backend.schema
     db_type = backend.db_type
-    with backend.get_engine().connect() as conn:
-        exists = conn.execute(
-            text(
-                f"SELECT 1 FROM {qi(schema, 'Connections', db_type)} WHERE ConnectionId = :cid AND IsActive = :active"
-            ),
-            {"cid": connection_id, "active": True},
-        ).fetchone()
-    if not exists:
-        raise HTTPException(status_code=404, detail="Connection not found")
+
+    # _require_connection_access validates connection existence and activity (404 if missing/inactive)
+    # and enforces user-level access control (403 if lacking UserConnectionAccess).
+    # The explicit existence check is intentionally omitted here — it is redundant.
+    creds = _require_connection_access(connection_id, user)
 
     # Validate schema/table/column against the target connection's INFORMATION_SCHEMA.
-    creds = _require_connection_access(connection_id, user)
+    # Use canonical names returned by the DB (not user-supplied strings) for storage,
+    # so the stored mask reliably matches during load_masks comparison even on
+    # case-sensitive collation configurations.
     try:
         with _open_target(creds) as target:
             cursor = target.cursor()
             cursor.timeout = TARGET_QUERY_TIMEOUT_SECONDS
             cursor.execute(
-                "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
+                "SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
                 "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?",
                 (body.schema_name, body.table_name, body.column_name),
             )
@@ -167,8 +163,8 @@ def add_mask(connection_id: str, body: MaskIn, user: dict = Depends(verify_token
             ),
         )
 
-    # Use the DB-canonical column name (preserves case).
-    canonical_col = col_row[0]
+    # Use DB-canonical schema, table, and column names (row[0], row[1], row[2]).
+    canonical_schema, canonical_table, canonical_col = col_row[0], col_row[1], col_row[2]
 
     # Insert the mask row.
     mask_table = qi(schema, "ColumnMasks", db_type)
@@ -187,8 +183,8 @@ def add_mask(connection_id: str, body: MaskIn, user: dict = Depends(verify_token
                 {
                     "mid": new_id,
                     "cid": connection_id,
-                    "schema": body.schema_name,
-                    "table": body.table_name,
+                    "schema": canonical_schema,
+                    "table": canonical_table,
                     "col": canonical_col,
                     "uid": user["user_id"],
                 },
