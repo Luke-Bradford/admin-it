@@ -188,16 +188,24 @@ def list_tables(connection_id: str, schema_name: str, user: dict = Depends(verif
         # Row counts from sys.dm_db_partition_stats (fast, no full scan).
         # Views are not included in this DMV, so row_count will always be None
         # for VIEW rows — the frontend handles null gracefully.
-        cursor.execute(
-            "SELECT o.name, SUM(p.row_count) "
-            "FROM sys.objects o "
-            "JOIN sys.schemas s ON s.schema_id = o.schema_id "
-            "JOIN sys.dm_db_partition_stats p ON p.object_id = o.object_id "
-            "WHERE s.name = ? AND o.type IN ('U','V') AND p.index_id IN (0,1) "
-            "GROUP BY o.name",
-            schema_name,
-        )
-        row_counts = {row[0]: row[1] for row in cursor.fetchall()}
+        # This DMV requires VIEW DATABASE STATE or VIEW SERVER STATE; wrap in
+        # try/except so a minimal-privilege account still gets the table list
+        # (with null row counts) rather than a hard 500 error.
+        try:
+            cursor.execute(
+                "SELECT o.name, SUM(p.row_count) "
+                "FROM sys.objects o "
+                "JOIN sys.schemas s ON s.schema_id = o.schema_id "
+                "JOIN sys.dm_db_partition_stats p ON p.object_id = o.object_id "
+                "WHERE s.name = ? AND o.type IN ('U','V') AND p.index_id IN (0,1) "
+                "GROUP BY o.name",
+                schema_name,
+            )
+            row_counts = {row[0]: row[1] for row in cursor.fetchall()}
+        except pyodbc.Error:
+            # VIEW DATABASE STATE not granted — return null counts rather than failing.
+            logger.debug("[browse] list_tables: row count query failed; returning null counts")
+            row_counts = {}
 
     tables = [
         {

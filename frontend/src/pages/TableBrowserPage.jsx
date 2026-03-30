@@ -7,7 +7,7 @@
 //
 // Access: any authenticated user with access to the connection.
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { authHeader } from '../utils/auth';
 import Spinner from '../components/ui/Spinner';
@@ -44,15 +44,21 @@ function SchemaNode({ connectionId, schema, selectedSchema, selectedTable, onSel
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Reset fetched tables when the connection or schema identity changes so
-  // reusing this component with different props does not serve stale data.
-  useEffect(() => {
-    setTables(null);
-    setError(null);
-  }, [connectionId, schema]);
+  // Track the identity the current tables/error state belongs to. If the
+  // caller passes new connectionId or schema props, load() compares against
+  // this ref to detect the change and reset before fetching — avoiding the
+  // race between a reset useEffect and useCallback with the same deps array.
+  const loadedKeyRef = useRef(null);
+  const currentKey = `${connectionId}:${schema}`;
 
   const load = useCallback(() => {
-    if (tables !== null) return; // already loaded — guard captures current tables at call time
+    if (tables !== null && loadedKeyRef.current === currentKey) {
+      return; // already loaded for this identity
+    }
+    // Identity changed or never loaded — reset stale state synchronously.
+    setTables(null);
+    setError(null);
+    loadedKeyRef.current = currentKey;
     setLoading(true);
     fetch(`/api/connections/${connectionId}/schemas/${encodeURIComponent(schema)}/tables`, {
       headers: authHeader(),
