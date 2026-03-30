@@ -442,6 +442,14 @@ export default function ConnectionsPage() {
                           Browse
                         </Link>
                         {isAdmin && (
+                          <Link
+                            to={`/connections/${c.id}/masks`}
+                            className="text-sm text-brand-600 hover:text-brand-800 transition-colors"
+                          >
+                            Masks
+                          </Link>
+                        )}
+                        {isAdmin && (
                           <button
                             onClick={() => setModal({ type: 'edit', connection: c })}
                             className="text-sm text-brand-600 hover:text-brand-800 transition-colors"
