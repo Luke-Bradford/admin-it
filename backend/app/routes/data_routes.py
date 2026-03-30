@@ -26,12 +26,15 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.routes.browse_routes import TARGET_QUERY_TIMEOUT_SECONDS, _open_target, _require_connection_access
-from app.utils.audit_helpers import log_export_audit
+from app.utils.audit_helpers import log_export_audit, log_masked_access_audit
 from app.utils.auth_dependency import verify_token
 from app.utils.db_helpers import get_backend
+from app.utils.mask_helpers import load_masks
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+ADMIN_ROLES = {"Admin", "SystemAdmin"}
 
 # Maximum rows that can be returned in a single page.
 MAX_PAGE_SIZE = 200
@@ -298,8 +301,13 @@ def browse_table(
         raise HTTPException(status_code=422, detail="page_size must be >= 1")
     page_size = min(page_size, MAX_PAGE_SIZE)
 
+    is_elevated = bool(ADMIN_ROLES.intersection(user.get("roles", [])))
     creds = _require_connection_access(connection_id, user)
     parsed_filters = _parse_filters(filters)
+
+    # Load masks before opening the target connection; raises on failure (safe-fail).
+    backend = get_backend()
+    masked_cols_lower = load_masks(backend, connection_id, schema_name, table_name)
 
     with _open_target(creds) as target:
         cursor = target.cursor()
@@ -334,11 +342,37 @@ def browse_table(
 
     rows = [{col_names[i]: _coerce(row[i]) for i in range(len(col_names))} for row in raw_rows]
 
+    # Apply column masking.
+    # masked_cols_lower is a set of lowercase names present in ColumnMasks for this table.
+    # - Admins see the real values but the access is audited.
+    # - Non-admins see "****" in place of masked values.
+    # The columns list is always returned unmodified so the UI retains the full schema shape.
+    if masked_cols_lower:
+        if is_elevated:
+            log_masked_access_audit(
+                backend=backend,
+                user_id=user["user_id"],
+                connection_id=connection_id,
+                schema_name=schema_name,
+                table_name=table_name,
+                masked_columns=sorted(masked_cols_lower),
+            )
+        else:
+            rows = [
+                {col: ("****" if col.lower() in masked_cols_lower else val) for col, val in row.items()} for row in rows
+            ]
+
     total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
+
+    # masked_columns: original-case names of masked columns for this table.
+    # Included for all users so the frontend can display a visual indicator
+    # on column headers (lock icon).
+    masked_col_names = [c for c in col_names if c.lower() in masked_cols_lower]
 
     return {
         "columns": col_names,
         "rows": rows,
+        "masked_columns": masked_col_names,
         "total_count": total_count,
         "page": page,
         "page_size": page_size,
@@ -414,8 +448,13 @@ def export_table(
     All identifiers are validated against INFORMATION_SCHEMA before use.
     Export events are written to the audit log.
     """
+    is_elevated = bool(ADMIN_ROLES.intersection(user.get("roles", [])))
     creds = _require_connection_access(connection_id, user)
     parsed_filters = _parse_filters(filters)
+
+    # Load masks before opening the target connection; raises on failure (safe-fail).
+    backend = get_backend()
+    masked_cols_lower = load_masks(backend, connection_id, schema_name, table_name)
 
     # raw_rows is only populated for XLSX; initialise here so the name is
     # always bound even if an exception occurs inside the with block before
@@ -436,14 +475,21 @@ def export_table(
         export_rows = min(total_count, MAX_EXPORT_ROWS)
         truncated = total_count > MAX_EXPORT_ROWS
 
+        # For non-admins, exclude masked columns from the export entirely.
+        # export_col_names is built from qp.all_db_cols (INFORMATION_SCHEMA-sourced),
+        # so no user input reaches the SELECT column list.
+        if masked_cols_lower and not is_elevated:
+            export_col_names = [c for c in qp.all_db_cols if c.lower() not in masked_cols_lower]
+        else:
+            export_col_names = qp.all_db_cols
+
+        cols_sql = ", ".join(_bracket(c) for c in export_col_names)
         data_sql = (
-            f"SELECT * FROM {qp.schema_q}.{qp.table_q} {qp.where_sql} {qp.order_sql} "
+            f"SELECT {cols_sql} FROM {qp.schema_q}.{qp.table_q} {qp.where_sql} {qp.order_sql} "
             f"OFFSET 0 ROWS FETCH NEXT {MAX_EXPORT_ROWS} ROWS ONLY"
         )
 
-        # Column names come from _build_query_parts (validated against INFORMATION_SCHEMA);
-        # no need to execute a separate query just to read cursor.description.
-        col_names = qp.all_db_cols
+        col_names = export_col_names
 
         if export_format == "xlsx":
             cursor.execute(data_sql, list(qp.bind_values))
@@ -451,7 +497,6 @@ def export_table(
 
     # Write export audit entry before dispatching the response.
     # log_export_audit swallows its own exceptions internally; no outer try/except needed.
-    backend = get_backend()
     log_export_audit(
         backend=backend,
         user_id=user["user_id"],
@@ -461,6 +506,17 @@ def export_table(
         export_format=export_format,
         row_count=export_rows,
     )
+
+    # If an admin is exporting and masked columns exist, log the access.
+    if masked_cols_lower and is_elevated:
+        log_masked_access_audit(
+            backend=backend,
+            user_id=user["user_id"],
+            connection_id=connection_id,
+            schema_name=schema_name,
+            table_name=table_name,
+            masked_columns=sorted(masked_cols_lower),
+        )
 
     common_headers = {
         "X-Total-Count": str(total_count),

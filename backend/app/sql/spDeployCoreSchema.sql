@@ -137,6 +137,36 @@ CREATE TABLE [' + @SchemaName + '].[UserConnectionAccess] (
 ';
 
 -----------------------------------------
+-- COLUMN MASKS
+-- Tracks which columns are masked per-connection.
+-- Temporal table for audit history; deletion is the removal mechanism (no IsActive).
+-----------------------------------------
+SET @sql += '
+IF NOT EXISTS (SELECT 1 FROM sys.tables t
+               JOIN sys.schemas s ON t.schema_id = s.schema_id
+               WHERE s.name = ''' + @SchemaName + ''' AND t.name = ''ColumnMasks'')
+BEGIN
+    CREATE TABLE [' + @SchemaName + '].[ColumnMasks] (
+        MaskId       UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID(),
+        ConnectionId UNIQUEIDENTIFIER NOT NULL,
+        SchemaName   NVARCHAR(128)    NOT NULL,
+        TableName    NVARCHAR(128)    NOT NULL,
+        ColumnName   NVARCHAR(128)    NOT NULL,
+        CreatedById  UNIQUEIDENTIFIER NULL,
+        CreatedDate  DATETIME2        NOT NULL DEFAULT SYSUTCDATETIME(),
+        ValidFrom    DATETIME2 GENERATED ALWAYS AS ROW START HIDDEN NOT NULL,
+        ValidTo      DATETIME2 GENERATED ALWAYS AS ROW END HIDDEN NOT NULL,
+        PERIOD FOR SYSTEM_TIME (ValidFrom, ValidTo),
+        CONSTRAINT PK_ColumnMasks PRIMARY KEY (MaskId),
+        CONSTRAINT UQ_ColumnMasks UNIQUE (ConnectionId, SchemaName, TableName, ColumnName),
+        CONSTRAINT FK_ColumnMasks_Connections
+            FOREIGN KEY (ConnectionId) REFERENCES [' + @SchemaName + '].[Connections](ConnectionId)
+    ) WITH (SYSTEM_VERSIONING = ON
+            (HISTORY_TABLE = [' + @SchemaName + '].[ColumnMasksHistory]));
+END
+';
+
+-----------------------------------------
 -- SECRETS
 -----------------------------------------
 SET @sql += '
@@ -347,6 +377,34 @@ BEGIN
 
     INSERT INTO [' + @SchemaName + '].[audit_log] (table_name, record_id, action, changed_by, old_data, new_data)
     VALUES (''Secrets'', @rid, @action, @uid, @old, @new);
+END
+';
+EXEC sp_executesql @trig;
+
+-- trg_audit_ColumnMasks
+SET @trig = '
+IF EXISTS (SELECT 1 FROM sys.triggers WHERE name = ''trg_audit_ColumnMasks''
+           AND parent_id = OBJECT_ID(''[' + @SchemaName + '].[ColumnMasks]''))
+    DROP TRIGGER [' + @SchemaName + '].[trg_audit_ColumnMasks];
+';
+EXEC sp_executesql @trig;
+
+SET @trig = '
+CREATE TRIGGER [' + @SchemaName + '].[trg_audit_ColumnMasks]
+ON [' + @SchemaName + '].[ColumnMasks]
+AFTER INSERT, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @action NVARCHAR(10);
+    IF EXISTS (SELECT 1 FROM inserted) SET @action = ''INSERT'';
+    ELSE SET @action = ''DELETE'';
+    DECLARE @uid UNIQUEIDENTIFIER = TRY_CAST(CAST(SESSION_CONTEXT(N''app_user_id'') AS NVARCHAR(36)) AS UNIQUEIDENTIFIER);
+    DECLARE @rid UNIQUEIDENTIFIER = CASE @action WHEN ''DELETE'' THEN (SELECT TOP 1 MaskId FROM deleted) ELSE (SELECT TOP 1 MaskId FROM inserted) END;
+    DECLARE @old NVARCHAR(MAX) = CASE WHEN @action = ''DELETE'' THEN (SELECT * FROM deleted FOR JSON AUTO) ELSE NULL END;
+    DECLARE @new NVARCHAR(MAX) = CASE WHEN @action = ''INSERT'' THEN (SELECT * FROM inserted FOR JSON AUTO) ELSE NULL END;
+    INSERT INTO [' + @SchemaName + '].[audit_log] (table_name, record_id, action, changed_by, old_data, new_data)
+    VALUES (''ColumnMasks'', @rid, @action, @uid, @old, @new);
 END
 ';
 EXEC sp_executesql @trig;
