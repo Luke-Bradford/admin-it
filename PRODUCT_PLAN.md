@@ -583,7 +583,7 @@ This gives the same query interface as the SQL Server audit log — the audit UI
 
 ## Immediate next actions (in order)
 
-Phase 1 hardening complete. Phase 2 (connection and user management) done. Phase 1.5 (frontend overhaul) done. Phase 2.5 setup wizard multi-database support done (#75–#82, #83–#86, #88 done). Setup wizard is fully working end-to-end for both SQL Server (create-new and existing) and PostgreSQL. First-time setup has been successfully completed. Remaining work in priority order:
+Phase 1 hardening complete. Phase 2 (connection and user management) done. Phase 1.5 (frontend overhaul) done. Phase 2.5 setup wizard multi-database support done (#75–#82, #83–#86, #88 done). Phase 3 data browser started: #12 (table browser — schemas, tables, columns) done. Setup wizard is fully working end-to-end for both SQL Server (create-new and existing) and PostgreSQL. First-time setup has been successfully completed. Remaining work in priority order:
 
-1. **Phase 3 (data browser)** — the core end-user value — start with #12 (table browser)
+1. **Phase 3 (data browser)** — continue with #13 (paginated row view with column filtering)
 2. **Auth UX improvement** — email as primary login identifier; username as display name only (open ticket)
