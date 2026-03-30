@@ -113,9 +113,12 @@ def _open_target(creds: dict) -> pyodbc.Connection:
     """
     driver = creds.get("odbc_driver", "ODBC Driver 17 for SQL Server")
     encrypt = ";Encrypt=yes;TrustServerCertificate=yes" if "18" in driver else ""
+    # SERVER= expects "hostname,port" as a single DSN token; brace-escape the
+    # combined value so a semicolon in either component cannot inject directives.
+    server = _cs_escape(f"{creds['host']},{creds['port']}")
     cs = (
         f"DRIVER={_cs_escape(driver)};"
-        f"SERVER={_cs_escape(creds['host'])},{_cs_escape(creds['port'])};"
+        f"SERVER={server};"
         f"DATABASE={_cs_escape(creds['database'])};"
         f"UID={_cs_escape(creds['db_user'])};"
         f"PWD={_cs_escape(creds['db_password'])}"
