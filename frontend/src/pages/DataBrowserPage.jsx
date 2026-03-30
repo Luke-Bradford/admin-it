@@ -380,7 +380,10 @@ export default function DataBrowserPage() {
       const objectUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = objectUrl;
-      a.download = `${table}.${exportFormat}`;
+      // Use the server-supplied sanitised filename from Content-Disposition.
+      const cd = res.headers.get('Content-Disposition') ?? '';
+      const match = cd.match(/filename="([^"]+)"/);
+      a.download = match ? match[1] : `${table}.${exportFormat}`;
       a.click();
       URL.revokeObjectURL(objectUrl);
     } catch (e) {

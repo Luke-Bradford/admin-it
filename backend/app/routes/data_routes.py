@@ -350,10 +350,14 @@ def browse_table(
 def _csv_stream(creds: dict, col_names: list[str], data_sql: str, bind_values: list, table_name: str):
     """Generator that streams CSV rows directly from a pyodbc cursor.
 
-    Opens its own connection so the context manager lifetime extends through
-    the full StreamingResponse iteration.  The connection is closed in the
-    finally block, which Python guarantees fires when the generator is closed
-    (either by the consumer exhausting it or by FastAPI's response teardown).
+    Opens its own connection so the connection lifetime extends through the full
+    StreamingResponse iteration.  _open_target() returns a raw pyodbc.Connection
+    (not a contextmanager wrapper), so calling it without `with` is correct here —
+    .cursor() and .close() work directly on the connection object.
+
+    The connection is closed in the finally block, which Python guarantees fires
+    when the generator is closed (either by the consumer exhausting it or by
+    FastAPI's response teardown).
     """
     target = _open_target(creds)
     try:
@@ -389,7 +393,7 @@ def export_table(
     connection_id: str,
     schema_name: str,
     table_name: str,
-    format: Literal["csv", "xlsx"] = "csv",
+    export_format: Literal["csv", "xlsx"] = "csv",
     sort_col: str | None = None,
     sort_dir: Literal["asc", "desc"] = "asc",
     # Same filter format as browse_table.
@@ -408,6 +412,11 @@ def export_table(
     """
     creds = _require_connection_access(connection_id, user)
     parsed_filters = _parse_filters(filters)
+
+    # raw_rows is only populated for XLSX; initialise here so the name is
+    # always bound even if an exception occurs inside the with block before
+    # cursor.fetchall() is reached (avoids UnboundLocalError in the XLSX branch).
+    raw_rows: list = []
 
     with _open_target(creds) as target:
         cursor = target.cursor()
@@ -428,25 +437,26 @@ def export_table(
             f"OFFSET 0 ROWS FETCH NEXT {MAX_EXPORT_ROWS} ROWS ONLY"
         )
 
-        col_names = [desc[0] for desc in cursor.execute(data_sql, list(qp.bind_values)).description]
+        # Column names come from _build_query_parts (validated against INFORMATION_SCHEMA);
+        # no need to execute a separate query just to read cursor.description.
+        col_names = qp.all_db_cols
 
-        if format == "xlsx":
+        if export_format == "xlsx":
+            cursor.execute(data_sql, list(qp.bind_values))
             raw_rows = cursor.fetchall()
 
     # Write export audit entry before dispatching the response.
-    try:
-        backend = get_backend()
-        log_export_audit(
-            backend=backend,
-            user_id=user["user_id"],
-            connection_id=connection_id,
-            schema_name=schema_name,
-            table_name=table_name,
-            export_format=format,
-            row_count=export_rows,
-        )
-    except Exception:
-        logger.exception("[export] Audit write failed — proceeding with export")
+    # log_export_audit swallows its own exceptions internally; no outer try/except needed.
+    backend = get_backend()
+    log_export_audit(
+        backend=backend,
+        user_id=user["user_id"],
+        connection_id=connection_id,
+        schema_name=schema_name,
+        table_name=table_name,
+        export_format=export_format,
+        row_count=export_rows,
+    )
 
     common_headers = {
         "X-Total-Count": str(total_count),
@@ -456,7 +466,7 @@ def export_table(
     # Sanitise filename: keep alphanumeric, dot, dash, underscore; replace rest.
     safe_name = "".join(c if c.isalnum() or c in "._-" else "_" for c in table_name)
 
-    if format == "csv":
+    if export_format == "csv":
         return StreamingResponse(
             _csv_stream(creds, col_names, data_sql, qp.bind_values, table_name),
             media_type="text/csv",
