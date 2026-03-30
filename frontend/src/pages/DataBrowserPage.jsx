@@ -65,7 +65,7 @@ function buildQueryString({ page, pageSize, sortCol, sortDir, filters }) {
 
 function buildExportQueryString({ sortCol, sortDir, filters, format }) {
   const params = new URLSearchParams();
-  params.set('format', format);
+  params.set('export_format', format);
   if (sortCol) {
     params.set('sort_col', sortCol);
     params.set('sort_dir', sortDir);
@@ -385,7 +385,8 @@ export default function DataBrowserPage() {
       const match = cd.match(/filename="([^"]+)"/);
       a.download = match ? match[1] : `${table}.${exportFormat}`;
       a.click();
-      URL.revokeObjectURL(objectUrl);
+      // Defer revocation so the browser has time to start the download.
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 100);
     } catch (e) {
       setExportNotice({ type: 'error', message: `Export failed: ${e.message}` });
     } finally {
