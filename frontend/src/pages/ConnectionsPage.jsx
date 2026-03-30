@@ -1,5 +1,6 @@
 // src/pages/ConnectionsPage.jsx
 import React, { useContext, useEffect, useReducer, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { UserContext } from '../context/UserContext';
 import { authHeader } from '../utils/auth';
 import Button from '../components/ui/Button';
@@ -417,11 +418,9 @@ export default function ConnectionsPage() {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Last modified
                   </th>
-                  {isAdmin && (
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Actions
-                    </th>
-                  )}
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -434,26 +433,32 @@ export default function ConnectionsPage() {
                     <td className="px-6 py-4 text-sm text-gray-500">
                       {formatDate(c.modified_date)}
                     </td>
-                    {isAdmin && (
-                      <td className="px-6 py-4 text-right">
-                        <div className="flex items-center justify-end gap-3">
+                    <td className="px-6 py-4 text-right">
+                      <div className="flex items-center justify-end gap-3">
+                        <Link
+                          to={`/connections/${c.id}/browse`}
+                          className="text-sm text-brand-600 hover:text-brand-800 transition-colors"
+                        >
+                          Browse
+                        </Link>
+                        {isAdmin && (
                           <button
                             onClick={() => setModal({ type: 'edit', connection: c })}
                             className="text-sm text-brand-600 hover:text-brand-800 transition-colors"
                           >
                             Edit
                           </button>
-                          {isSystemAdmin && (
-                            <button
-                              onClick={() => setModal({ type: 'delete', connection: c })}
-                              className="text-sm text-danger-600 hover:text-danger-800 transition-colors"
-                            >
-                              Delete
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    )}
+                        )}
+                        {isSystemAdmin && (
+                          <button
+                            onClick={() => setModal({ type: 'delete', connection: c })}
+                            className="text-sm text-danger-600 hover:text-danger-800 transition-colors"
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>

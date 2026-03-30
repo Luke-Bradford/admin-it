@@ -9,6 +9,7 @@ const SEGMENT_LABELS = {
   users: 'Users',
   audit: 'Audit Log',
   profile: 'Profile',
+  browse: 'Table Browser',
 };
 
 export default function Breadcrumb() {

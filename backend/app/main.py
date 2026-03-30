@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app import settings
 from app.routes.audit_routes import router as audit_router
 from app.routes.auth_routes import router as auth_router
+from app.routes.browse_routes import router as browse_router
 from app.routes.connections_routes import router as connections_router
 from app.routes.discovery_routes import router as discovery_router
 from app.routes.manage_routes import router as manage_router
@@ -135,5 +136,6 @@ app.include_router(discovery_router, prefix="/api/discover", tags=["Discovery"])
 app.include_router(auth_router, prefix="/api/auth", tags=["Auth"])
 app.include_router(manage_router, prefix="/api/manage", tags=["Manage"])
 app.include_router(connections_router, prefix="/api/connections", tags=["Connections"])
+app.include_router(browse_router, prefix="/api/connections", tags=["Browse"])
 app.include_router(users_router, prefix="/api/users", tags=["Users"])
 app.include_router(audit_router, prefix="/api/audit", tags=["Audit"])
