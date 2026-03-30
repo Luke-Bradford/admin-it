@@ -298,7 +298,9 @@ export default function DataBrowserPage() {
     fetchData(page, pageSize, sortCol, sortDir, appliedFilters);
   }, [fetchData, page, pageSize, sortCol, sortDir, appliedFilters]);
 
-  // Cleanup on unmount.
+  // Abort any in-flight fetch when the component unmounts.
+  // Route changes that trigger a new fetch are handled inside fetchData itself,
+  // which aborts the previous controller before starting a new one.
   useEffect(() => {
     return () => controllerRef.current?.abort();
   }, []);

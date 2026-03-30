@@ -89,23 +89,35 @@ def _validate_identifiers(
     schema_name: str,
     table_name: str,
     column_names: list[str],
-) -> list[str]:
+) -> tuple[str, str, list[str]]:
     """Validate schema/table/columns against INFORMATION_SCHEMA.
 
-    Returns the list of column names in their canonical case from the DB.
+    Returns (canonical_schema, canonical_table, canonical_columns) — all
+    names are taken directly from the DB, not from the caller's input.
+    This ensures bracket-quoting uses the exact case the DB stores rather
+    than the case supplied in the URL, and makes the security comment in
+    the caller accurate: only DB-returned names reach the SQL template.
+
     Raises HTTPException 404 if the table is not found.
-    Raises HTTPException 422 if any filter column is not in the table.
+    Raises HTTPException 422 if any requested column is not in the table.
     """
-    # Fetch actual columns for this table — case-normalised by the DB.
+    # Fetch canonical schema and table name from INFORMATION_SCHEMA.TABLES.
+    cursor.execute(
+        "SELECT TABLE_SCHEMA, TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?",
+        (schema_name, table_name),
+    )
+    table_row = cursor.fetchone()
+    if not table_row:
+        raise HTTPException(status_code=404, detail="Table not found")
+    canonical_schema, canonical_table = table_row[0], table_row[1]
+
+    # Fetch canonical column names in ordinal order.
     cursor.execute(
         "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
         "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION",
         (schema_name, table_name),
     )
     db_columns = {row[0].lower(): row[0] for row in cursor.fetchall()}
-
-    if not db_columns:
-        raise HTTPException(status_code=404, detail="Table not found")
 
     unknown = [c for c in column_names if c.lower() not in db_columns]
     if unknown:
@@ -114,7 +126,7 @@ def _validate_identifiers(
             detail=f"Unknown column(s): {', '.join(unknown)}",
         )
 
-    return list(db_columns.values())
+    return canonical_schema, canonical_table, list(db_columns.values())
 
 
 def _validate_column(db_columns_lower: dict[str, str], column: str) -> str:
@@ -127,6 +139,8 @@ def _validate_column(db_columns_lower: dict[str, str], column: str) -> str:
 
 def _build_filter_value(operator: str, raw_value: str | None) -> str | None:
     """Translate a raw filter value into the appropriate LIKE pattern or plain value."""
+    if raw_value is None:
+        return None
     if operator == "contains":
         # Escape LIKE metacharacters in the user value, then wrap in %.
         escaped = raw_value.replace("[", "[[]").replace("%", "[%]").replace("_", "[_]")
@@ -169,7 +183,9 @@ def browse_table(
     """
     if page < 1:
         raise HTTPException(status_code=422, detail="page must be >= 1")
-    page_size = min(max(1, page_size), MAX_PAGE_SIZE)
+    if page_size < 1:
+        raise HTTPException(status_code=422, detail="page_size must be >= 1")
+    page_size = min(page_size, MAX_PAGE_SIZE)
 
     creds = _require_connection_access(connection_id, user)
 
@@ -199,11 +215,13 @@ def browse_table(
         sort_cols = [sort_col] if sort_col else []
         all_check_cols = list(dict.fromkeys(filter_cols + sort_cols))  # deduplicated
 
-        all_db_cols = _validate_identifiers(cursor, schema_name, table_name, all_check_cols)
+        canonical_schema, canonical_table, all_db_cols = _validate_identifiers(
+            cursor, schema_name, table_name, all_check_cols
+        )
         db_cols_lower = {c.lower(): c for c in all_db_cols}
 
-        schema_q = _bracket(schema_name)
-        table_q = _bracket(table_name)
+        schema_q = _bracket(canonical_schema)
+        table_q = _bracket(canonical_table)
 
         # 2. Build WHERE clause — column names bracket-quoted from allowlist.
         where_parts: list[str] = []
@@ -230,13 +248,13 @@ def browse_table(
 
         # 4. Total count (for pagination metadata).
         count_sql = f"SELECT COUNT(*) FROM {schema_q}.{table_q} {where_sql}"
-        cursor.execute(count_sql, bind_values)
+        cursor.execute(count_sql, list(bind_values))
         total_count = cursor.fetchone()[0]
 
         # 5. Paginated data using OFFSET/FETCH (SQL Server 2012+).
         offset = (page - 1) * page_size
         data_sql = f"SELECT * FROM {schema_q}.{table_q} {where_sql} {order_sql} OFFSET ? ROWS FETCH NEXT ? ROWS ONLY"
-        cursor.execute(data_sql, bind_values + [offset, page_size])
+        cursor.execute(data_sql, list(bind_values) + [offset, page_size])
 
         col_names = [desc[0] for desc in cursor.description]
         raw_rows = cursor.fetchall()

@@ -159,6 +159,7 @@ function TableNode({ connectionId, schema, table, selected, onSelect }) {
         stroke="currentColor"
         strokeWidth={1.75}
         viewBox="0 0 24 24"
+        aria-hidden="true"
       >
         {table.type === 'VIEW' ? (
           <path
@@ -187,8 +188,9 @@ function TableNode({ connectionId, schema, table, selected, onSelect }) {
       {/* Columns icon — click to preview columns in right panel */}
       <button
         onClick={onSelect}
-        title="Preview columns"
-        className="shrink-0 opacity-0 group-hover:opacity-100 text-gray-400 hover:text-gray-700 transition-all"
+        title={`Preview columns for ${table.name}`}
+        aria-label={`Preview columns for ${table.name}`}
+        className="shrink-0 opacity-0 group-hover:opacity-100 focus:opacity-100 text-gray-400 hover:text-gray-700 transition-all"
       >
         <svg
           className="w-3.5 h-3.5"
@@ -196,6 +198,7 @@ function TableNode({ connectionId, schema, table, selected, onSelect }) {
           stroke="currentColor"
           strokeWidth={2}
           viewBox="0 0 24 24"
+          aria-hidden="true"
         >
           <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
         </svg>
