@@ -460,7 +460,7 @@ This gives the same query interface as the SQL Server audit log — the audit UI
 
 ---
 
-#### #14 — Data export (CSV / Excel)
+#### #14 — Data export (CSV / Excel) ✅ done
 **Size:** M
 **Persona:** End user + Power user
 **Problem:** Users need to take data away to use in reports or share with colleagues. Currently impossible.
@@ -583,7 +583,7 @@ This gives the same query interface as the SQL Server audit log — the audit UI
 
 ## Immediate next actions (in order)
 
-Phase 1 hardening complete. Phase 2 (connection and user management) done. Phase 1.5 (frontend overhaul) done. Phase 2.5 setup wizard multi-database support done (#75–#82, #83–#86, #88 done). Phase 3 data browser: #12 (table browser — schemas, tables, columns) done; #13 (paginated row view with column filtering) done. Setup wizard is fully working end-to-end for both SQL Server (create-new and existing) and PostgreSQL. First-time setup has been successfully completed. Remaining work in priority order:
+Phase 1 hardening complete. Phase 2 (connection and user management) done. Phase 1.5 (frontend overhaul) done. Phase 2.5 setup wizard multi-database support done (#75–#82, #83–#86, #88 done). Phase 3 data browser: #12 (table browser — schemas, tables, columns) done; #13 (paginated row view with column filtering) done; #14 (data export CSV / Excel) done. Setup wizard is fully working end-to-end for both SQL Server (create-new and existing) and PostgreSQL. First-time setup has been successfully completed. Remaining work in priority order:
 
-1. **Phase 3 (data browser)** — continue with #14 (data export CSV / Excel)
+1. **Phase 3 (data browser)** — continue with #15 (column-level data masking)
 2. **Auth UX improvement** — email as primary login identifier; username as display name only (open ticket)
