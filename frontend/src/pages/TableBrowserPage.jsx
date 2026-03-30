@@ -8,7 +8,7 @@
 // Access: any authenticated user with access to the connection.
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { authHeader } from '../utils/auth';
 import Spinner from '../components/ui/Spinner';
 import Badge from '../components/ui/Badge';
@@ -127,8 +127,9 @@ function SchemaNode({ connectionId, schema, selectedSchema, selectedTable, onSel
             tables.map((t) => (
               <TableNode
                 key={t.name}
-                table={t}
+                connectionId={connectionId}
                 schema={schema}
+                table={t}
                 selected={selectedSchema === schema && selectedTable === t.name}
                 onSelect={() => onSelectTable(schema, t)}
               />
@@ -143,12 +144,13 @@ function SchemaNode({ connectionId, schema, selectedSchema, selectedTable, onSel
 // Table tree item
 // ---------------------------------------------------------------------------
 
-function TableNode({ table, selected, onSelect }) {
+function TableNode({ connectionId, schema, table, selected, onSelect }) {
+  const dataPath = `/connections/${connectionId}/browse/${encodeURIComponent(schema)}/${encodeURIComponent(table.name)}`;
+
   return (
-    <button
-      onClick={onSelect}
-      className={`w-full flex items-center gap-1.5 px-2 py-1.5 text-sm text-left rounded transition-colors ${
-        selected ? 'bg-brand-100 text-brand-800' : 'hover:bg-gray-100 text-gray-700'
+    <div
+      className={`group flex items-center gap-1.5 px-2 py-1.5 text-sm rounded transition-colors ${
+        selected ? 'bg-brand-100' : 'hover:bg-gray-100'
       }`}
     >
       <svg
@@ -172,11 +174,33 @@ function TableNode({ table, selected, onSelect }) {
           />
         )}
       </svg>
-      <span className="truncate flex-1">{table.name}</span>
+      {/* Table name navigates to data browser */}
+      <Link
+        to={dataPath}
+        className={`truncate flex-1 ${selected ? 'text-brand-800' : 'text-gray-700 hover:text-brand-700'} transition-colors`}
+      >
+        {table.name}
+      </Link>
       {table.row_count != null && (
         <span className="shrink-0 text-xs text-gray-400">{formatRowCount(table.row_count)}</span>
       )}
-    </button>
+      {/* Columns icon — click to preview columns in right panel */}
+      <button
+        onClick={onSelect}
+        title="Preview columns"
+        className="shrink-0 opacity-0 group-hover:opacity-100 text-gray-400 hover:text-gray-700 transition-all"
+      >
+        <svg
+          className="w-3.5 h-3.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+        </svg>
+      </button>
+    </div>
   );
 }
 
