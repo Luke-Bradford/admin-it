@@ -7,6 +7,7 @@ import LoginPage from './pages/LoginPage.jsx';
 import RequireAuth from './components/RequireAuth';
 import Dashboard from './pages/Dashboard';
 import ConnectionsPage from './pages/ConnectionsPage';
+import TableBrowserPage from './pages/TableBrowserPage';
 import UsersPage from './pages/UsersPage';
 import ProfilePage from './pages/ProfilePage';
 import Layout from './components/Layout';
@@ -85,11 +86,21 @@ export default function App() {
           }
         />
         <Route
-          path="/connections/*"
+          path="/connections"
           element={
             <RequireAuth>
               <AppShell>
                 <ConnectionsPage />
+              </AppShell>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/connections/:connectionId/browse"
+          element={
+            <RequireAuth>
+              <AppShell>
+                <TableBrowserPage />
               </AppShell>
             </RequireAuth>
           }
