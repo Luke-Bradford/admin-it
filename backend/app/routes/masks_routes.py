@@ -234,6 +234,12 @@ def delete_mask(connection_id: str, mask_id: str, user: dict = Depends(verify_to
     _validate_uuid(connection_id, "connection_id")
     _validate_uuid(mask_id, "mask_id")
 
+    # Verify connection exists and is accessible to the caller — consistent with
+    # list_masks and add_mask.  The scoped WHERE (MaskId AND ConnectionId) prevents
+    # cross-connection deletion, but does not prevent a revoked admin from deleting
+    # masks on a connection they no longer have access to.
+    _require_connection_access(connection_id, user)
+
     backend = get_backend()
     mask_table = qi(backend.schema, "ColumnMasks", backend.db_type)
 
