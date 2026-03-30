@@ -13,6 +13,9 @@
 #   - Target-DB queries use parameterised statements only; schema/table name
 #     path parameters are passed as bind values to INFORMATION_SCHEMA queries
 #     (never interpolated into SQL).
+#   - pyodbc connection string values are brace-escaped to prevent connection-
+#     string injection (a semicolon or ODBC keyword in a credential value would
+#     otherwise allow injection at the driver level).
 
 import logging
 
@@ -39,6 +42,10 @@ ADMIN_ROLES = {"Admin", "SystemAdmin"}
 def _require_connection_access(connection_id: str, user: dict) -> dict:
     """Fetch the connection row and verify the calling user has access.
 
+    For admins: a single query fetches the ConnectionString directly.
+    For non-admins: a single JOIN query fetches the ConnectionString only when
+    a matching UserConnectionAccess row exists — no TOCTOU gap.
+
     Returns the decrypted credentials dict on success.
     Raises 404 if the connection does not exist or is inactive.
     Raises 403 if a non-admin user has no UserConnectionAccess row.
@@ -50,47 +57,68 @@ def _require_connection_access(connection_id: str, user: dict) -> dict:
     is_admin = bool(ADMIN_ROLES.intersection(user.get("roles", [])))
 
     with engine.connect() as conn:
-        row = conn.execute(
-            text(f"""
-                SELECT "ConnectionString"
-                FROM {qi(schema, "Connections", db_type)}
-                WHERE "ConnectionId" = :cid AND "IsActive" = :active
-            """),
-            {"cid": connection_id, "active": True},
-        ).fetchone()
-
-    if not row:
-        raise HTTPException(status_code=404, detail="Connection not found")
-
-    if not is_admin:
-        with engine.connect() as conn:
-            access = conn.execute(
+        if is_admin:
+            row = conn.execute(
                 text(f"""
-                    SELECT 1
-                    FROM {qi(schema, "UserConnectionAccess", db_type)}
-                    WHERE "ConnectionId" = :cid AND "UserId" = :uid
+                    SELECT "ConnectionString"
+                    FROM {qi(schema, "Connections", db_type)}
+                    WHERE "ConnectionId" = :cid AND "IsActive" = :active
                 """),
-                {"cid": connection_id, "uid": user["user_id"]},
+                {"cid": connection_id, "active": True},
             ).fetchone()
-        if not access:
-            raise HTTPException(status_code=403, detail="Access denied to this connection")
+            if not row:
+                raise HTTPException(status_code=404, detail="Connection not found")
+        else:
+            # Single JOIN — connection existence and access permission checked atomically.
+            row = conn.execute(
+                text(f"""
+                    SELECT c."ConnectionString"
+                    FROM {qi(schema, "Connections", db_type)} c
+                    JOIN {qi(schema, "UserConnectionAccess", db_type)} uca
+                        ON uca."ConnectionId" = c."ConnectionId"
+                    WHERE c."ConnectionId" = :cid AND c."IsActive" = :active
+                      AND uca."UserId" = :uid
+                """),
+                {"cid": connection_id, "active": True, "uid": user["user_id"]},
+            ).fetchone()
+            if not row:
+                # Return 403 rather than 404 to avoid leaking connection existence
+                # to users who have no access.
+                raise HTTPException(status_code=403, detail="Access denied to this connection")
 
     return decrypt_credentials(backend, row[0])
 
 
+def _cs_escape(value: str) -> str:
+    """Escape a value for safe interpolation into a pyodbc connection string.
+
+    pyodbc DSN values that contain special characters must be wrapped in braces.
+    Any literal `}` inside the value is doubled to `}}` so the driver does not
+    misinterpret it as the closing brace of the wrapper.
+
+    This prevents connection-string injection: a semicolon or ODBC keyword in
+    a credential value (e.g. PWD=x;Trusted_Connection=yes) would otherwise let
+    an attacker inject additional DSN directives at the pyodbc layer.
+    """
+    return "{" + str(value).replace("}", "}}") + "}"
+
+
 def _open_target(creds: dict) -> pyodbc.Connection:
     """Open a pyodbc connection to the target database.
+
+    Credential values are brace-escaped via _cs_escape() before interpolation
+    to prevent connection-string injection.
 
     Raises 400 if the connection cannot be established.
     """
     driver = creds.get("odbc_driver", "ODBC Driver 17 for SQL Server")
     encrypt = ";Encrypt=yes;TrustServerCertificate=yes" if "18" in driver else ""
     cs = (
-        f"DRIVER={{{driver}}};"
+        f"DRIVER={_cs_escape(driver)};"
         f"SERVER={creds['host']},{creds['port']};"
-        f"DATABASE={creds['database']};"
-        f"UID={creds['db_user']};"
-        f"PWD={creds['db_password']}"
+        f"DATABASE={_cs_escape(creds['database'])};"
+        f"UID={_cs_escape(creds['db_user'])};"
+        f"PWD={_cs_escape(creds['db_password'])}"
         f"{encrypt}"
     )
     try:
@@ -115,14 +143,13 @@ def list_schemas(connection_id: str, user: dict = Depends(verify_token)):
 
     with _open_target(creds) as target:
         cursor = target.cursor()
-        cursor.execute(
-            "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA "
-            "WHERE SCHEMA_NAME NOT IN "
-            "('information_schema','sys','db_owner','db_accessadmin','db_securityadmin',"
-            "'db_ddladmin','db_backupoperator','db_datareader','db_datawriter',"
-            "'db_denydatareader','db_denydatawriter','guest') "
-            "ORDER BY SCHEMA_NAME"
-        )
+        # Filter using sys.schemas.schema_id instead of a name-based exclusion
+        # list. SQL Server reserves schema_id values >= 16384 for user-created
+        # schemas. Built-in fixed-database-role schemas (db_owner, db_datareader,
+        # etc.) and system schemas (sys, INFORMATION_SCHEMA, guest) all have
+        # schema_id < 16384. 'dbo' has schema_id=1 but is a genuine user schema
+        # so it is explicitly included.
+        cursor.execute("SELECT name FROM sys.schemas WHERE schema_id >= 16384 OR name = 'dbo' ORDER BY name")
         schemas = [row[0] for row in cursor.fetchall()]
 
     return {"schemas": schemas}

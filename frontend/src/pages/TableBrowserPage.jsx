@@ -26,7 +26,7 @@ function formatRowCount(n) {
 }
 
 function typeLabel(col) {
-  const t = col.data_type.toLowerCase();
+  const t = (col.data_type ?? '').toLowerCase();
   if (col.max_length != null) return `${t}(${col.max_length})`;
   if (col.numeric_precision != null && col.numeric_scale != null) {
     return `${t}(${col.numeric_precision},${col.numeric_scale})`;
@@ -38,12 +38,11 @@ function typeLabel(col) {
 // Schema tree item
 // ---------------------------------------------------------------------------
 
-function SchemaNode({ schema, selectedSchema, selectedTable, onSelectTable }) {
+function SchemaNode({ connectionId, schema, selectedSchema, selectedTable, onSelectTable }) {
   const [open, setOpen] = useState(schema === selectedSchema);
   const [tables, setTables] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const { connectionId } = useParams();
 
   const load = useCallback(() => {
     if (tables !== null) return; // already loaded
@@ -312,6 +311,7 @@ export default function TableBrowserPage() {
             schemasState.schemas.map((s) => (
               <SchemaNode
                 key={s}
+                connectionId={connectionId}
                 schema={s}
                 selectedSchema={selected?.schema}
                 selectedTable={selected?.table?.name}
