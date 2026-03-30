@@ -141,8 +141,7 @@ def add_mask(connection_id: str, body: MaskIn, user: dict = Depends(verify_token
     # Validate schema/table/column against the target connection's INFORMATION_SCHEMA.
     creds = _require_connection_access(connection_id, user)
     try:
-        target = _open_target(creds)
-        try:
+        with _open_target(creds) as target:
             cursor = target.cursor()
             cursor.timeout = TARGET_QUERY_TIMEOUT_SECONDS
             cursor.execute(
@@ -151,8 +150,6 @@ def add_mask(connection_id: str, body: MaskIn, user: dict = Depends(verify_token
                 (body.schema_name, body.table_name, body.column_name),
             )
             col_row = cursor.fetchone()
-        finally:
-            target.close()
     except HTTPException:
         raise
     except Exception as exc:
@@ -239,11 +236,13 @@ def delete_mask(connection_id: str, mask_id: str, user: dict = Depends(verify_to
     backend = get_backend()
     mask_table = qi(backend.schema, "ColumnMasks", backend.db_type)
 
+    # Use OUTPUT DELETED to reliably detect whether the row existed.
+    # rowcount can be -1 on some MSSQL/pyodbc configurations.
     with backend.get_engine().begin() as conn:
-        result = conn.execute(
-            text(f"DELETE FROM {mask_table} WHERE MaskId = :mid AND ConnectionId = :cid"),
+        deleted = conn.execute(
+            text(f"DELETE FROM {mask_table} OUTPUT DELETED.MaskId WHERE MaskId = :mid AND ConnectionId = :cid"),
             {"mid": mask_id, "cid": connection_id},
-        )
+        ).fetchone()
 
-    if result.rowcount == 0:
+    if deleted is None:
         raise HTTPException(status_code=404, detail="Mask not found")

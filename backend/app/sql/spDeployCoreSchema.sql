@@ -400,7 +400,13 @@ BEGIN
     IF EXISTS (SELECT 1 FROM inserted) SET @action = ''INSERT'';
     ELSE SET @action = ''DELETE'';
     DECLARE @uid UNIQUEIDENTIFIER = TRY_CAST(CAST(SESSION_CONTEXT(N''app_user_id'') AS NVARCHAR(36)) AS UNIQUEIDENTIFIER);
-    DECLARE @rid UNIQUEIDENTIFIER = CASE @action WHEN ''DELETE'' THEN (SELECT TOP 1 MaskId FROM deleted) ELSE (SELECT TOP 1 MaskId FROM inserted) END;
+    -- record_id is NULL for multi-row batches to avoid misleading attribution.
+    -- old_data / new_data use FOR JSON AUTO which correctly captures all affected rows.
+    DECLARE @rid UNIQUEIDENTIFIER = CASE
+        WHEN (SELECT COUNT(*) FROM inserted) + (SELECT COUNT(*) FROM deleted) = 1
+        THEN COALESCE((SELECT TOP 1 MaskId FROM inserted), (SELECT TOP 1 MaskId FROM deleted))
+        ELSE NULL
+    END;
     DECLARE @old NVARCHAR(MAX) = CASE WHEN @action = ''DELETE'' THEN (SELECT * FROM deleted FOR JSON AUTO) ELSE NULL END;
     DECLARE @new NVARCHAR(MAX) = CASE WHEN @action = ''INSERT'' THEN (SELECT * FROM inserted FOR JSON AUTO) ELSE NULL END;
     INSERT INTO [' + @SchemaName + '].[audit_log] (table_name, record_id, action, changed_by, old_data, new_data)

@@ -241,6 +241,7 @@ export default function ConnectionMasksPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
+  const [deleteError, setDeleteError] = useState(null);
   const [connectionName, setConnectionName] = useState(null);
 
   // Load masks.
@@ -278,6 +279,7 @@ export default function ConnectionMasksPage() {
 
   async function handleDelete(maskId) {
     setDeletingId(maskId);
+    setDeleteError(null);
     try {
       const res = await fetch(`/api/connections/${connectionId}/masks/${maskId}`, {
         method: 'DELETE',
@@ -285,9 +287,12 @@ export default function ConnectionMasksPage() {
       });
       if (res.ok) {
         setMasks((prev) => prev.filter((m) => m.mask_id !== maskId));
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setDeleteError(data.detail ?? `Failed to remove mask (HTTP ${res.status}).`);
       }
     } catch {
-      // Silently ignore — the mask row stays in the list; user can retry.
+      setDeleteError('Network error. Please try again.');
     } finally {
       setDeletingId(null);
     }
@@ -348,6 +353,29 @@ export default function ConnectionMasksPage() {
 
       {/* Add mask panel */}
       <AddMaskPanel connectionId={connectionId} onAdded={handleAdded} />
+
+      {/* Delete error */}
+      {deleteError && (
+        <div className="rounded bg-danger-50 border border-danger-200 px-3 py-2 text-sm text-danger-700 flex items-center justify-between">
+          <span>{deleteError}</span>
+          <button
+            onClick={() => setDeleteError(null)}
+            className="ml-4 text-current opacity-60 hover:opacity-100 transition-opacity"
+            aria-label="Dismiss"
+          >
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
 
       {/* Existing masks */}
       <div className="bg-white shadow-sm rounded-lg border border-gray-200 overflow-hidden">
