@@ -115,7 +115,7 @@ def _open_target(creds: dict) -> pyodbc.Connection:
     encrypt = ";Encrypt=yes;TrustServerCertificate=yes" if "18" in driver else ""
     cs = (
         f"DRIVER={_cs_escape(driver)};"
-        f"SERVER={creds['host']},{creds['port']};"
+        f"SERVER={_cs_escape(creds['host'])},{_cs_escape(creds['port'])};"
         f"DATABASE={_cs_escape(creds['database'])};"
         f"UID={_cs_escape(creds['db_user'])};"
         f"PWD={_cs_escape(creds['db_password'])}"
@@ -175,6 +175,8 @@ def list_tables(connection_id: str, schema_name: str, user: dict = Depends(verif
         tables_raw = cursor.fetchall()
 
         # Row counts from sys.dm_db_partition_stats (fast, no full scan).
+        # Views are not included in this DMV, so row_count will always be None
+        # for VIEW rows — the frontend handles null gracefully.
         cursor.execute(
             "SELECT o.name, SUM(p.row_count) "
             "FROM sys.objects o "

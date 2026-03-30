@@ -45,7 +45,7 @@ function SchemaNode({ connectionId, schema, selectedSchema, selectedTable, onSel
   const [error, setError] = useState(null);
 
   const load = useCallback(() => {
-    if (tables !== null) return; // already loaded
+    if (tables !== null) return; // already loaded — guard captures current tables at call time
     setLoading(true);
     fetch(`/api/connections/${connectionId}/schemas/${encodeURIComponent(schema)}/tables`, {
       headers: authHeader(),
@@ -57,7 +57,8 @@ function SchemaNode({ connectionId, schema, selectedSchema, selectedTable, onSel
       .then((d) => setTables(d.tables))
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [connectionId, schema, tables]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectionId, schema]);
 
   function toggle() {
     if (!open) load();
