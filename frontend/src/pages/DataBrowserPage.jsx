@@ -63,6 +63,24 @@ function buildQueryString({ page, pageSize, sortCol, sortDir, filters }) {
   return params.toString();
 }
 
+function buildExportQueryString({ sortCol, sortDir, filters, format }) {
+  const params = new URLSearchParams();
+  params.set('export_format', format);
+  if (sortCol) {
+    params.set('sort_col', sortCol);
+    params.set('sort_dir', sortDir);
+  }
+  for (const f of filters) {
+    if (f.column && f.operator) {
+      const val = NULL_OPERATORS.has(f.operator)
+        ? `${f.column}:${f.operator}`
+        : `${f.column}:${f.operator}:${f.value ?? ''}`;
+      params.append('filters', val);
+    }
+  }
+  return params.toString();
+}
+
 // ---------------------------------------------------------------------------
 // FilterRow component
 // ---------------------------------------------------------------------------
@@ -246,6 +264,9 @@ export default function DataBrowserPage() {
   // UI state
   const [visibleCols, setVisibleCols] = useState(null); // null = all
   const [showPicker, setShowPicker] = useState(false);
+  const [exportFormat, setExportFormat] = useState('csv');
+  const [exporting, setExporting] = useState(false);
+  const [exportNotice, setExportNotice] = useState(null); // null | { type: 'warning'|'error', message }
 
   const controllerRef = useRef(null);
 
@@ -294,7 +315,10 @@ export default function DataBrowserPage() {
   );
 
   // Initial load + re-fetch when query params change.
+  // Clear any stale export notice when the table changes (fetchData is recreated
+  // with new connectionId/schema/table deps, triggering this effect).
   useEffect(() => {
+    setExportNotice(null);
     fetchData(page, pageSize, sortCol, sortDir, appliedFilters);
   }, [fetchData, page, pageSize, sortCol, sortDir, appliedFilters]);
 
@@ -330,6 +354,47 @@ export default function DataBrowserPage() {
     setFilters([]);
     setAppliedFilters([]);
     setPage(1);
+  }
+
+  async function handleExport() {
+    setExporting(true);
+    setExportNotice(null);
+    const qs = buildExportQueryString({
+      sortCol,
+      sortDir,
+      filters: appliedFilters,
+      format: exportFormat,
+    });
+    const url = `/api/connections/${connectionId}/data/${encodeURIComponent(schema)}/${encodeURIComponent(table)}/export?${qs}`;
+    try {
+      const res = await fetch(url, { headers: authHeader() });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.detail ?? `HTTP ${res.status}`);
+      }
+      if (res.headers.get('X-Export-Truncated') === 'true') {
+        const total = res.headers.get('X-Total-Count');
+        setExportNotice({
+          type: 'warning',
+          message: `Only the first 10,000 of ${Number(total).toLocaleString()} rows were exported.`,
+        });
+      }
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      // Use the server-supplied sanitised filename from Content-Disposition.
+      const cd = res.headers.get('Content-Disposition') ?? '';
+      const match = cd.match(/filename="([^"]+)"/);
+      a.download = match ? match[1] : `${table}.${exportFormat}`;
+      a.click();
+      // Defer revocation so the browser has time to start the download.
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 100);
+    } catch (e) {
+      setExportNotice({ type: 'error', message: `Export failed: ${e.message}` });
+    } finally {
+      setExporting(false);
+    }
   }
 
   const columns = data?.columns ?? [];
@@ -438,6 +503,43 @@ export default function DataBrowserPage() {
               )}
             </div>
           )}
+
+          {/* Export format picker + export button */}
+          <select
+            value={exportFormat}
+            onChange={(e) => setExportFormat(e.target.value)}
+            disabled={!data || exporting}
+            className="text-sm border border-gray-300 rounded px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
+          >
+            <option value="csv">CSV</option>
+            <option value="xlsx">Excel</option>
+          </select>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleExport}
+            disabled={!data || exporting}
+          >
+            {exporting ? (
+              <Spinner className="w-3.5 h-3.5" />
+            ) : (
+              <svg
+                className="w-3.5 h-3.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                />
+              </svg>
+            )}
+            {exporting ? 'Exporting…' : 'Export'}
+          </Button>
         </div>
 
         {/* Active filters */}
@@ -457,6 +559,35 @@ export default function DataBrowserPage() {
           </div>
         )}
       </div>
+
+      {/* Export notice (truncation warning or error) */}
+      {exportNotice && (
+        <div
+          className={`shrink-0 px-6 py-2 border-b text-sm flex items-center justify-between ${
+            exportNotice.type === 'error'
+              ? 'bg-danger-50 border-danger-200 text-danger-800'
+              : 'bg-yellow-50 border-yellow-200 text-yellow-800'
+          }`}
+        >
+          <span>{exportNotice.message}</span>
+          <button
+            onClick={() => setExportNotice(null)}
+            className="ml-4 text-current opacity-60 hover:opacity-100 transition-opacity"
+            aria-label="Dismiss"
+          >
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
 
       {/* Data grid */}
       <div className="flex-1 overflow-auto bg-white">
