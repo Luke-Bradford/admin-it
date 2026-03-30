@@ -315,7 +315,10 @@ export default function DataBrowserPage() {
   );
 
   // Initial load + re-fetch when query params change.
+  // Clear any stale export notice when the table changes (fetchData is recreated
+  // with new connectionId/schema/table deps, triggering this effect).
   useEffect(() => {
+    setExportNotice(null);
     fetchData(page, pageSize, sortCol, sortDir, appliedFilters);
   }, [fetchData, page, pageSize, sortCol, sortDir, appliedFilters]);
 

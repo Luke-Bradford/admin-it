@@ -60,6 +60,10 @@ OPERATOR_SQL: dict[str, str] = {
 # Operators that require no value argument.
 NULL_OPERATORS = {"is_null", "is_not_null"}
 
+# Characters illegal in Excel sheet names: \ / ? * [ ] :
+# Pre-computed at module level so it is not rebuilt on every XLSX export.
+_ILLEGAL_SHEET_CHARS = str.maketrans({c: "_" for c in r"\/?*[:]"})
+
 
 # ---------------------------------------------------------------------------
 # Request models
@@ -347,7 +351,7 @@ def browse_table(
 # ---------------------------------------------------------------------------
 
 
-def _csv_stream(creds: dict, col_names: list[str], data_sql: str, bind_values: list, table_name: str):
+def _csv_stream(creds: dict, col_names: list[str], data_sql: str, bind_values: list):
     """Generator that streams CSV rows directly from a pyodbc cursor.
 
     Opens its own connection so the connection lifetime extends through the full
@@ -468,7 +472,7 @@ def export_table(
 
     if export_format == "csv":
         return StreamingResponse(
-            _csv_stream(creds, col_names, data_sql, qp.bind_values, table_name),
+            _csv_stream(creds, col_names, data_sql, qp.bind_values),
             media_type="text/csv",
             headers={
                 **common_headers,
@@ -479,8 +483,6 @@ def export_table(
     # XLSX: build in memory (rows already fetched above, capped at 10k).
     wb = openpyxl.Workbook()
     ws = wb.active
-    # Excel sheet names: max 31 chars, and must not contain \ / ? * [ ] :
-    _ILLEGAL_SHEET_CHARS = str.maketrans({c: "_" for c in r"\/?*[:]"})
     ws.title = table_name.translate(_ILLEGAL_SHEET_CHARS)[:31]
     ws.append(col_names)
     for row in raw_rows:
