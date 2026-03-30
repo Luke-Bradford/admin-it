@@ -74,10 +74,10 @@ def log_masked_access_audit(
 ) -> None:
     """Write a single audit_log row when a privileged user accesses masked column data.
 
-    Uses action='INSERT' and table_name='MaskedColumnAccess' to identify the
-    event type, consistent with the DataExport pattern.  The new_data JSON carries
-    connection_id, schema, table, and the list of masked column names that were
-    accessed.
+    Uses action='ACCESS' and table_name='MaskedColumnAccess' to identify the
+    event type.  'ACCESS' is a semantic verb for read-only audit events that do not
+    mutate any core table.  The new_data JSON carries connection_id, schema, table,
+    and the list of masked column names that were accessed.
 
     Failures are logged but not re-raised — a failed audit write must not prevent
     the data response from being delivered to the admin user.
@@ -98,7 +98,7 @@ def log_masked_access_audit(
                 text(
                     f"INSERT INTO {audit_table} "
                     "(table_name, record_id, action, changed_by, new_data) "
-                    "VALUES (:tbl, NULL, 'INSERT', :uid, :data)"
+                    "VALUES (:tbl, NULL, 'ACCESS', :uid, :data)"
                 ),
                 {"tbl": "MaskedColumnAccess", "uid": user_id, "data": payload},
             )

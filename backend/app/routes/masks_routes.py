@@ -71,10 +71,15 @@ def _validate_uuid(value: str, name: str) -> str:
 def list_masks(connection_id: str, user: dict = Depends(verify_token)):
     """List all column masks configured for a connection.
 
-    Admin role required.
+    Admin role required.  Also verifies the connection exists and is accessible
+    to the caller (consistent with add_mask and delete_mask behaviour).
     """
     _require_admin(user)
     _validate_uuid(connection_id, "connection_id")
+
+    # Verify connection exists and is active (returns 404 if not).
+    # Creds are not needed here — call is used purely for the existence/access check.
+    _require_connection_access(connection_id, user)
 
     backend = get_backend()
     mask_table = qi(backend.schema, "ColumnMasks", backend.db_type)

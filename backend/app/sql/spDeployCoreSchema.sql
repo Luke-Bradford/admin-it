@@ -205,7 +205,7 @@ BEGIN
         old_data      NVARCHAR(MAX)    NULL,
         new_data      NVARCHAR(MAX)    NULL,
         PRIMARY KEY (id),
-        CONSTRAINT chk_audit_log_action CHECK (action IN (''INSERT'', ''UPDATE'', ''DELETE''))
+        CONSTRAINT chk_audit_log_action CHECK (action IN (''INSERT'', ''UPDATE'', ''DELETE'', ''ACCESS'', ''EXPORT''))
     );
 END
 ';
