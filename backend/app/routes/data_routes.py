@@ -479,7 +479,9 @@ def export_table(
     # XLSX: build in memory (rows already fetched above, capped at 10k).
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = table_name[:31]  # Excel sheet name limit is 31 characters.
+    # Excel sheet names: max 31 chars, and must not contain \ / ? * [ ] :
+    _ILLEGAL_SHEET_CHARS = str.maketrans({c: "_" for c in r"\/?*[:]"})
+    ws.title = table_name.translate(_ILLEGAL_SHEET_CHARS)[:31]
     ws.append(col_names)
     for row in raw_rows:
         ws.append([None if v is None else str(v) for v in row])
