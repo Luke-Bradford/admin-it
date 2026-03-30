@@ -33,6 +33,12 @@ logger = logging.getLogger(__name__)
 
 ADMIN_ROLES = {"Admin", "SystemAdmin"}
 
+# Maximum time (seconds) to wait for a single query on a target database.
+# The pyodbc connect() timeout covers only the connection handshake; this
+# covers individual cursor.execute() calls so a slow or hung target DB
+# cannot block a FastAPI worker thread indefinitely.
+TARGET_QUERY_TIMEOUT_SECONDS = 30
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -146,13 +152,14 @@ def list_schemas(connection_id: str, user: dict = Depends(verify_token)):
 
     with _open_target(creds) as target:
         cursor = target.cursor()
+        cursor.timeout = TARGET_QUERY_TIMEOUT_SECONDS
         # Filter using sys.schemas.schema_id instead of a name-based exclusion
         # list. SQL Server reserves schema_id values >= 16384 for user-created
         # schemas. Built-in fixed-database-role schemas (db_owner, db_datareader,
         # etc.) and system schemas (sys, INFORMATION_SCHEMA, guest) all have
         # schema_id < 16384. 'dbo' has schema_id=1 but is a genuine user schema
-        # so it is explicitly included.
-        cursor.execute("SELECT name FROM sys.schemas WHERE schema_id >= 16384 OR name = 'dbo' ORDER BY name")
+        # so it is explicitly included via its fixed schema_id rather than by name.
+        cursor.execute("SELECT name FROM sys.schemas WHERE schema_id >= 16384 OR schema_id = 1 ORDER BY name")
         schemas = [row[0] for row in cursor.fetchall()]
 
     return {"schemas": schemas}
@@ -170,6 +177,7 @@ def list_tables(connection_id: str, schema_name: str, user: dict = Depends(verif
 
     with _open_target(creds) as target:
         cursor = target.cursor()
+        cursor.timeout = TARGET_QUERY_TIMEOUT_SECONDS
         # Fetch table list from INFORMATION_SCHEMA — schema_name is a bind parameter.
         cursor.execute(
             "SELECT TABLE_NAME, TABLE_TYPE FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME",
@@ -220,6 +228,7 @@ def list_columns(
 
     with _open_target(creds) as target:
         cursor = target.cursor()
+        cursor.timeout = TARGET_QUERY_TIMEOUT_SECONDS
         cursor.execute(
             "SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, "
             "NUMERIC_PRECISION, NUMERIC_SCALE, IS_NULLABLE, COLUMN_DEFAULT, ORDINAL_POSITION "

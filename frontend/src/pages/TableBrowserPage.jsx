@@ -44,6 +44,13 @@ function SchemaNode({ connectionId, schema, selectedSchema, selectedTable, onSel
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  // Reset fetched tables when the connection or schema identity changes so
+  // reusing this component with different props does not serve stale data.
+  useEffect(() => {
+    setTables(null);
+    setError(null);
+  }, [connectionId, schema]);
+
   const load = useCallback(() => {
     if (tables !== null) return; // already loaded — guard captures current tables at call time
     setLoading(true);
