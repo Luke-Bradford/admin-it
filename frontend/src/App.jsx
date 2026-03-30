@@ -7,6 +7,7 @@ import LoginPage from './pages/LoginPage.jsx';
 import RequireAuth from './components/RequireAuth';
 import Dashboard from './pages/Dashboard';
 import ConnectionsPage from './pages/ConnectionsPage';
+import ConnectionMasksPage from './pages/ConnectionMasksPage';
 import TableBrowserPage from './pages/TableBrowserPage';
 import DataBrowserPage from './pages/DataBrowserPage';
 import UsersPage from './pages/UsersPage';
@@ -92,6 +93,16 @@ export default function App() {
             <RequireAuth>
               <AppShell>
                 <ConnectionsPage />
+              </AppShell>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/connections/:connectionId/masks"
+          element={
+            <RequireAuth>
+              <AppShell>
+                <ConnectionMasksPage />
               </AppShell>
             </RequireAuth>
           }

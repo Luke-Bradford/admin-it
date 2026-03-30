@@ -16,6 +16,7 @@ from app.routes.connections_routes import router as connections_router
 from app.routes.data_routes import router as data_router
 from app.routes.discovery_routes import router as discovery_router
 from app.routes.manage_routes import router as manage_router
+from app.routes.masks_routes import router as masks_router
 from app.routes.setup_routes import router as setup_router
 from app.routes.users_routes import router as users_router
 from app.utils.db_helpers import init_engine
@@ -140,5 +141,6 @@ app.include_router(manage_router, prefix="/api/manage", tags=["Manage"])
 app.include_router(connections_router, prefix="/api/connections", tags=["Connections"])
 app.include_router(browse_router, prefix="/api/connections", tags=["Browse"])
 app.include_router(data_router, prefix="/api/connections", tags=["Data"])
+app.include_router(masks_router, prefix="/api/connections", tags=["Masks"])
 app.include_router(users_router, prefix="/api/users", tags=["Users"])
 app.include_router(audit_router, prefix="/api/audit", tags=["Audit"])

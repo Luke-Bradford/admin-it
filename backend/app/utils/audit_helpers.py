@@ -62,3 +62,49 @@ def log_export_audit(
             user_id,
             connection_id,
         )
+
+
+def log_masked_access_audit(
+    backend: CoreBackend,
+    user_id: str,
+    connection_id: str,
+    schema_name: str,
+    table_name: str,
+    masked_columns: list[str],
+) -> None:
+    """Write a single audit_log row when a privileged user accesses masked column data.
+
+    Uses action='ACCESS' and table_name='MaskedColumnAccess' to identify the
+    event type.  'ACCESS' is a semantic verb for read-only audit events that do not
+    mutate any core table.  The new_data JSON carries connection_id, schema, table,
+    and the list of masked column names that were accessed.
+
+    Failures are logged but not re-raised — a failed audit write must not prevent
+    the data response from being delivered to the admin user.
+    """
+    audit_table = qi(backend.schema, "audit_log", backend.db_type)
+    payload = json.dumps(
+        {
+            "connection_id": connection_id,
+            "schema": schema_name,
+            "table": table_name,
+            "masked_columns": masked_columns,
+            "user_id": user_id,
+        }
+    )
+    try:
+        with backend.get_engine().begin() as conn:
+            conn.execute(
+                text(
+                    f"INSERT INTO {audit_table} "
+                    "(table_name, record_id, action, changed_by, new_data) "
+                    "VALUES (:tbl, NULL, 'ACCESS', :uid, :data)"
+                ),
+                {"tbl": "MaskedColumnAccess", "uid": user_id, "data": payload},
+            )
+    except Exception:
+        logger.exception(
+            "[audit] Failed to write masked access audit row for user=%s connection=%s",
+            user_id,
+            connection_id,
+        )
