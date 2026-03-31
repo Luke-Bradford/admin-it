@@ -2,12 +2,10 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.utils.auth_dependency import verify_token
+from app.utils.auth_dependency import ADMIN_ROLES, verify_token
 from app.utils.db_helpers import get_backend
 
 router = APIRouter()
-
-ADMIN_ROLES = {"Admin", "SystemAdmin"}
 
 
 @router.get("")

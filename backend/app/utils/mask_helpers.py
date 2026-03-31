@@ -16,6 +16,35 @@ from app.utils.sql_helpers import quote_ident as qi
 logger = logging.getLogger(__name__)
 
 
+def load_masks_for_connection(
+    backend: CoreBackend,
+    connection_id: str,
+) -> set[str]:
+    """Return a set of lowercase column names that are masked for *any* table
+    on the given connection.
+
+    Used by the saved-query run/export endpoints where schema+table context is
+    unavailable for arbitrary query results.  Masking is applied by column name
+    alone — a conservative over-mask is preferable to under-masking.
+
+    Re-raises on failure: same safe-failure semantics as load_masks().
+    """
+    mask_table = qi(backend.schema, "ColumnMasks", backend.db_type)
+    try:
+        with backend.get_engine().connect() as conn:
+            rows = conn.execute(
+                text(f"SELECT ColumnName FROM {mask_table} WHERE ConnectionId = :cid"),
+                {"cid": connection_id},
+            ).fetchall()
+        return {row[0].lower() for row in rows}
+    except Exception:
+        logger.exception(
+            "[masks] Failed to load connection-level masks for connection=%s",
+            connection_id,
+        )
+        raise
+
+
 def load_masks(
     backend: CoreBackend,
     connection_id: str,

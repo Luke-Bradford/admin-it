@@ -167,6 +167,60 @@ END
 ';
 
 -----------------------------------------
+-- SAVED QUERIES and QUERY PARAMETERS
+-----------------------------------------
+SET @sql += '
+IF NOT EXISTS (SELECT 1 FROM sys.tables t
+               JOIN sys.schemas s ON t.schema_id = s.schema_id
+               WHERE s.name = ''' + @SchemaName + ''' AND t.name = ''SavedQueries'')
+BEGIN
+    CREATE TABLE [' + @SchemaName + '].[SavedQueries] (
+        SavedQueryId UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID(),
+        ConnectionId UNIQUEIDENTIFIER NOT NULL,
+        Name         NVARCHAR(255)    NOT NULL,
+        Description  NVARCHAR(1000)   NULL,
+        QueryText    NVARCHAR(MAX)    NOT NULL,
+        IsActive     BIT              NOT NULL DEFAULT 1,
+        CreatedById  UNIQUEIDENTIFIER NULL,
+        CreatedDate  DATETIME2        NOT NULL DEFAULT SYSUTCDATETIME(),
+        ModifiedById UNIQUEIDENTIFIER NULL,
+        ModifiedDate DATETIME2        NOT NULL DEFAULT SYSUTCDATETIME(),
+        CONSTRAINT PK_SavedQueries PRIMARY KEY (SavedQueryId),
+        CONSTRAINT UQ_SavedQueries_ConnName UNIQUE (ConnectionId, Name),
+        CONSTRAINT FK_SavedQueries_Connections
+            FOREIGN KEY (ConnectionId) REFERENCES [' + @SchemaName + '].[Connections](ConnectionId),
+        CONSTRAINT FK_SavedQueries_CreatedBy
+            FOREIGN KEY (CreatedById) REFERENCES [' + @SchemaName + '].[Users](UserId),
+        CONSTRAINT FK_SavedQueries_ModifiedBy
+            FOREIGN KEY (ModifiedById) REFERENCES [' + @SchemaName + '].[Users](UserId)
+    );
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.tables t
+               JOIN sys.schemas s ON t.schema_id = s.schema_id
+               WHERE s.name = ''' + @SchemaName + ''' AND t.name = ''QueryParameters'')
+BEGIN
+    CREATE TABLE [' + @SchemaName + '].[QueryParameters] (
+        ParameterId    UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID(),
+        SavedQueryId   UNIQUEIDENTIFIER NOT NULL,
+        Name           NVARCHAR(100)    NOT NULL,
+        Label          NVARCHAR(255)    NOT NULL,
+        ParamType      NVARCHAR(20)     NOT NULL,
+        IsRequired     BIT              NOT NULL DEFAULT 1,
+        DefaultValue   NVARCHAR(500)    NULL,
+        SelectOptions  NVARCHAR(MAX)    NULL,
+        DisplayOrder   INT              NOT NULL DEFAULT 0,
+        CONSTRAINT PK_QueryParameters PRIMARY KEY (ParameterId),
+        CONSTRAINT UQ_QueryParameters_QueryName UNIQUE (SavedQueryId, Name),
+        CONSTRAINT CHK_QueryParameters_ParamType
+            CHECK (ParamType IN (''text'', ''number'', ''date'', ''boolean'', ''select'')),
+        CONSTRAINT FK_QueryParameters_SavedQueries
+            FOREIGN KEY (SavedQueryId) REFERENCES [' + @SchemaName + '].[SavedQueries](SavedQueryId)
+    );
+END
+';
+
+-----------------------------------------
 -- SECRETS
 -----------------------------------------
 SET @sql += '
@@ -217,6 +271,18 @@ SET @sql += '
 IF NOT EXISTS (SELECT 1 FROM [' + @SchemaName + '].[Roles] WHERE RoleName = ''SystemAdmin'')
     INSERT INTO [' + @SchemaName + '].[Roles] (RoleId, RoleName, CreatedById, CreatedDate, ModifiedById, ModifiedDate)
     VALUES (NEWID(), ''SystemAdmin'', NULL, SYSUTCDATETIME(), NULL, SYSUTCDATETIME());
+
+IF NOT EXISTS (SELECT 1 FROM [' + @SchemaName + '].[Roles] WHERE RoleName = ''Admin'')
+    INSERT INTO [' + @SchemaName + '].[Roles] (RoleId, RoleName, CreatedById, CreatedDate, ModifiedById, ModifiedDate)
+    VALUES (NEWID(), ''Admin'', NULL, SYSUTCDATETIME(), NULL, SYSUTCDATETIME());
+
+IF NOT EXISTS (SELECT 1 FROM [' + @SchemaName + '].[Roles] WHERE RoleName = ''PowerUser'')
+    INSERT INTO [' + @SchemaName + '].[Roles] (RoleId, RoleName, CreatedById, CreatedDate, ModifiedById, ModifiedDate)
+    VALUES (NEWID(), ''PowerUser'', NULL, SYSUTCDATETIME(), NULL, SYSUTCDATETIME());
+
+IF NOT EXISTS (SELECT 1 FROM [' + @SchemaName + '].[Roles] WHERE RoleName = ''EndUser'')
+    INSERT INTO [' + @SchemaName + '].[Roles] (RoleId, RoleName, CreatedById, CreatedDate, ModifiedById, ModifiedDate)
+    VALUES (NEWID(), ''EndUser'', NULL, SYSUTCDATETIME(), NULL, SYSUTCDATETIME());
 
 IF NOT EXISTS (SELECT 1 FROM [' + @SchemaName + '].[ConnectionPermissions])
     BEGIN
@@ -411,6 +477,41 @@ BEGIN
     DECLARE @new NVARCHAR(MAX) = CASE WHEN @action = ''INSERT'' THEN (SELECT * FROM inserted FOR JSON AUTO) ELSE NULL END;
     INSERT INTO [' + @SchemaName + '].[audit_log] (table_name, record_id, action, changed_by, old_data, new_data)
     VALUES (''ColumnMasks'', @rid, @action, @uid, @old, @new);
+END
+';
+EXEC sp_executesql @trig;
+
+-- trg_audit_SavedQueries
+SET @trig = '
+IF EXISTS (SELECT 1 FROM sys.triggers WHERE name = ''trg_audit_SavedQueries''
+           AND parent_id = OBJECT_ID(''[' + @SchemaName + '].[SavedQueries]''))
+    DROP TRIGGER [' + @SchemaName + '].[trg_audit_SavedQueries];
+';
+EXEC sp_executesql @trig;
+
+SET @trig = '
+CREATE TRIGGER [' + @SchemaName + '].[trg_audit_SavedQueries]
+ON [' + @SchemaName + '].[SavedQueries]
+AFTER INSERT, UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @action NVARCHAR(10);
+    IF EXISTS (SELECT 1 FROM inserted) AND EXISTS (SELECT 1 FROM deleted)
+        SET @action = ''UPDATE'';
+    ELSE IF EXISTS (SELECT 1 FROM inserted)
+        SET @action = ''INSERT'';
+    ELSE
+        SET @action = ''DELETE'';
+
+    DECLARE @uid UNIQUEIDENTIFIER = TRY_CAST(CAST(SESSION_CONTEXT(N''app_user_id'') AS NVARCHAR(36)) AS UNIQUEIDENTIFIER);
+    DECLARE @rid UNIQUEIDENTIFIER = CASE @action WHEN ''DELETE'' THEN (SELECT TOP 1 SavedQueryId FROM deleted) ELSE (SELECT TOP 1 SavedQueryId FROM inserted) END;
+    -- QueryText excluded from audit to avoid bloating the log with large SQL strings.
+    DECLARE @old NVARCHAR(MAX) = CASE WHEN @action IN (''UPDATE'', ''DELETE'') THEN (SELECT SavedQueryId, ConnectionId, Name, Description, IsActive, CreatedById, CreatedDate, ModifiedById, ModifiedDate FROM deleted FOR JSON AUTO) ELSE NULL END;
+    DECLARE @new NVARCHAR(MAX) = CASE WHEN @action IN (''INSERT'', ''UPDATE'') THEN (SELECT SavedQueryId, ConnectionId, Name, Description, IsActive, CreatedById, CreatedDate, ModifiedById, ModifiedDate FROM inserted FOR JSON AUTO) ELSE NULL END;
+
+    INSERT INTO [' + @SchemaName + '].[audit_log] (table_name, record_id, action, changed_by, old_data, new_data)
+    VALUES (''SavedQueries'', @rid, @action, @uid, @old, @new);
 END
 ';
 EXEC sp_executesql @trig;

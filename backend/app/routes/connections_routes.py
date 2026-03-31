@@ -9,15 +9,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
-from app.utils.auth_dependency import verify_token
+from app.utils.auth_dependency import ADMIN_ROLES, verify_token
 from app.utils.connection_crypto import decrypt_credentials, encrypt_credentials
 from app.utils.db_helpers import get_backend
 from app.utils.sql_helpers import quote_ident as qi
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-ADMIN_ROLES = {"Admin", "SystemAdmin"}
 
 # Allowlist of supported ODBC drivers. User input is validated against this
 # before being interpolated into the connection string.
