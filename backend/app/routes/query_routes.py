@@ -653,11 +653,11 @@ def update_query(saved_query_id: str, body: QueryPatch, user: dict = Depends(ver
     if not POWER_AND_ABOVE.intersection(user.get("roles", [])):
         raise HTTPException(status_code=403, detail="PowerUser or Admin role required")
 
-    if not body.__fields_set__:
+    if not body.model_fields_set:
         raise HTTPException(status_code=400, detail="No fields to update")
 
     # Pre-flight: verify query exists and caller has access.
-    _fetch_query_row(saved_query_id, user)
+    existing = _fetch_query_row(saved_query_id, user)
 
     if body.parameters is not None:
         _validate_params(body.parameters)
@@ -668,16 +668,29 @@ def update_query(saved_query_id: str, body: QueryPatch, user: dict = Depends(ver
     p_table = qi(schema, "QueryParameters", db_type)
     now = datetime.now(timezone.utc)
 
+    # Name-uniqueness check (active + inactive) before the UPDATE.
+    # Must exclude the current query's own row so a no-op name update doesn't self-collide.
+    if "name" in body.model_fields_set and body.name is not None and body.name != existing["name"]:
+        with engine.connect() as conn:
+            dup = conn.execute(
+                text(
+                    f'SELECT 1 FROM {q_table} WHERE "ConnectionId" = :cid AND "Name" = :name AND "SavedQueryId" != :qid'
+                ),
+                {"cid": existing["connection_id"], "name": body.name, "qid": saved_query_id},
+            ).fetchone()
+        if dup:
+            raise HTTPException(status_code=409, detail="A query with this name already exists for this connection")
+
     set_clauses = ['"ModifiedById" = :uid', '"ModifiedDate" = :now']
     bind: dict = {"uid": user["user_id"], "now": now, "qid": saved_query_id}
 
-    if "name" in body.__fields_set__ and body.name is not None:
+    if "name" in body.model_fields_set and body.name is not None:
         set_clauses.append('"Name" = :name')
         bind["name"] = body.name
-    if "description" in body.__fields_set__:
+    if "description" in body.model_fields_set:
         set_clauses.append('"Description" = :desc')
         bind["desc"] = body.description  # None clears the field
-    if "query_text" in body.__fields_set__ and body.query_text is not None:
+    if "query_text" in body.model_fields_set and body.query_text is not None:
         set_clauses.append('"QueryText" = :qt')
         bind["qt"] = body.query_text
 
@@ -765,6 +778,8 @@ def run_query(saved_query_id: str, body: RunRequest, user: dict = Depends(verify
 
     rows, masked_col_names = _apply_masking(rows, col_names, masked_cols_lower, is_admin)
 
+    # Only admins see real values in masked columns; audit their access.
+    # Non-admins receive '****' substitution — no audit needed for that path.
     if masked_col_names and is_admin:
         log_masked_access_audit(
             backend=backend,

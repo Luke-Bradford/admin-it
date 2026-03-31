@@ -107,7 +107,7 @@ function ParamRow({ param, index, onChange, onRemove }) {
         />
       </div>
       {/* Remove */}
-      <div className="flex items-center justify-end">
+      <div className="col-span-1 flex items-center justify-end">
         <button
           type="button"
           onClick={() => onRemove(index)}
@@ -444,7 +444,11 @@ function RunModal({ query, onClose }) {
   const [values, setValues] = useState(() => {
     const init = {};
     for (const p of query.parameters ?? []) {
-      init[p.name] = p.param_type === 'boolean' ? false : '';
+      if (p.param_type === 'boolean') {
+        init[p.name] = p.default_value === 'true' || p.default_value === '1';
+      } else {
+        init[p.name] = p.default_value ?? '';
+      }
     }
     return init;
   });
