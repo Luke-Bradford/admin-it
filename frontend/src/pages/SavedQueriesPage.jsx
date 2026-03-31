@@ -600,7 +600,8 @@ function RunModal({ query, onClose }) {
             {/* Toolbar */}
             <div className="px-6 py-2 flex items-center justify-between border-b border-gray-100 bg-gray-50 shrink-0">
               <span className="text-xs text-gray-500">
-                {result.total_count.toLocaleString()} row{result.total_count !== 1 ? 's' : ''}
+                {(result.total_count ?? 0).toLocaleString()} row
+                {(result.total_count ?? 0) !== 1 ? 's' : ''}
               </span>
               <div className="flex items-center gap-2">
                 <button

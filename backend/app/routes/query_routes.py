@@ -369,7 +369,7 @@ def _rewrite_and_bind(query_text: str, param_defs: list[dict], supplied: dict[st
             if p["is_required"]:
                 raise HTTPException(status_code=422, detail=f"Required parameter '{token}' is missing")
             raw = None
-        select_options = json.loads(p["select_options"]) if p["select_options"] else None
+        select_options = p["select_options"]  # already a list from _fetch_parameters
         coerced = (
             _coerce_param(token, raw if raw is not None else "", p["param_type"], select_options)
             if raw is not None
