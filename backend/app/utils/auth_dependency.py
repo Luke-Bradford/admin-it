@@ -11,6 +11,10 @@ from app.utils.sql_helpers import quote_ident as qi
 
 security = HTTPBearer()
 
+# Roles that bypass UserConnectionAccess checks (can see all connections/queries).
+# Must be imported by all route modules rather than re-defined locally.
+ADMIN_ROLES: set[str] = {"Admin", "SystemAdmin"}
+
 
 def verify_token_string(token: str) -> dict:
     """Validate a raw JWT string and return the enriched user context dict.

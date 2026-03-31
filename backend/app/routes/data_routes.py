@@ -27,14 +27,12 @@ from pydantic import BaseModel, Field
 
 from app.routes.browse_routes import TARGET_QUERY_TIMEOUT_SECONDS, _open_target, _require_connection_access
 from app.utils.audit_helpers import log_export_audit, log_masked_access_audit
-from app.utils.auth_dependency import verify_token
+from app.utils.auth_dependency import ADMIN_ROLES, verify_token
 from app.utils.db_helpers import get_backend
 from app.utils.mask_helpers import load_masks
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-ADMIN_ROLES = {"Admin", "SystemAdmin"}
 
 # Maximum rows that can be returned in a single page.
 MAX_PAGE_SIZE = 200
