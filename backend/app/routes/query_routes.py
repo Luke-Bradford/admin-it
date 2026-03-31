@@ -181,19 +181,19 @@ def _fetch_query_row(saved_query_id: str, user: dict) -> dict:
         row = conn.execute(
             text(f"""
                 SELECT q."SavedQueryId", q."ConnectionId", q."Name", q."Description",
-                       q."QueryText", q."IsActive",
-                       q."CreatedById", q."CreatedDate", q."ModifiedById", q."ModifiedDate",
+                       q."QueryText", q."CreatedById",
+                       q."CreatedDate", q."ModifiedById", q."ModifiedDate",
                        c."Name" AS "ConnectionName",
                        u."Username" AS "CreatedByUsername"
                 FROM {qi(schema, "SavedQueries", db_type)} q
                 JOIN {qi(schema, "Connections", db_type)} c ON c."ConnectionId" = q."ConnectionId"
                 LEFT JOIN {qi(schema, "Users", db_type)} u ON u."UserId" = q."CreatedById"
-                WHERE q."SavedQueryId" = :qid
+                WHERE q."SavedQueryId" = :qid AND q."IsActive" = :active
             """),
-            {"qid": saved_query_id},
+            {"qid": saved_query_id, "active": True},
         ).fetchone()
 
-    if not row or not row[5]:  # row[5] = IsActive
+    if not row:
         raise HTTPException(status_code=404, detail="Query not found")
 
     query = dict(
@@ -204,7 +204,6 @@ def _fetch_query_row(saved_query_id: str, user: dict) -> dict:
                 "name",
                 "description",
                 "query_text",
-                "is_active",
                 "created_by_id",
                 "created_date",
                 "modified_by_id",
@@ -270,7 +269,7 @@ def _build_query_response(query: dict, params: list[dict], include_query_text: b
     created = query["created_date"]
     modified = query["modified_date"]
     resp = {
-        "saved_query_id": str(query["saved_query_id"]),
+        "id": str(query["saved_query_id"]),
         "connection_id": str(query["connection_id"]),
         "connection_name": query["connection_name"],
         "name": query["name"],
@@ -327,7 +326,7 @@ def _validate_select_text(query_text: str) -> None:
     if not stripped.upper().startswith("SELECT"):
         raise HTTPException(
             status_code=422,
-            detail="Query text must start with SELECT. CTE queries (WITH ...) are not supported.",
+            detail="Query must start with SELECT. CTE/WITH queries are not supported.",
         )
     if ";" in stripped:
         raise HTTPException(
@@ -451,41 +450,55 @@ def create_query(body: QueryIn, user: dict = Depends(verify_token)):
     now = datetime.now(timezone.utc)
 
     with engine.begin() as conn:
-        # Check for duplicate name on this connection.
+        # Check for duplicate name on this connection (active AND inactive — the DB
+        # UNIQUE constraint covers both states, so we match it here to return a 409
+        # rather than letting an integrity error bubble as a 500).
         dup = conn.execute(
-            text(f'SELECT 1 FROM {q_table} WHERE "ConnectionId" = :cid AND "Name" = :name AND "IsActive" = :active'),
-            {"cid": body.connection_id, "name": body.name, "active": True},
+            text(f'SELECT 1 FROM {q_table} WHERE "ConnectionId" = :cid AND "Name" = :name'),
+            {"cid": body.connection_id, "name": body.name},
         ).fetchone()
         if dup:
             raise HTTPException(status_code=409, detail="A query with this name already exists for this connection")
 
-        conn.execute(
-            text(f"""
-                INSERT INTO {q_table}
-                    ("ConnectionId", "Name", "Description", "QueryText",
-                     "IsActive", "CreatedById", "CreatedDate", "ModifiedById", "ModifiedDate")
-                VALUES (:cid, :name, :desc, :qt, :active, :uid, :now, :uid, :now)
-            """),
-            {
-                "cid": body.connection_id,
-                "name": body.name,
-                "desc": body.description,
-                "qt": body.query_text,
-                "active": True,
-                "uid": user["user_id"],
-                "now": now,
-            },
-        )
-
-        # Fetch the new ID.
-        new_id_row = conn.execute(
-            text(
-                f'SELECT "SavedQueryId" FROM {q_table}'
-                ' WHERE "ConnectionId" = :cid AND "Name" = :name'
-                ' AND "CreatedById" = :uid AND "CreatedDate" = :now'
-            ),
-            {"cid": body.connection_id, "name": body.name, "uid": user["user_id"], "now": now},
-        ).fetchone()
+        # Use OUTPUT / RETURNING to fetch the generated PK atomically.
+        if db_type == "postgres":
+            new_id_row = conn.execute(
+                text(f"""
+                    INSERT INTO {q_table}
+                        ("ConnectionId", "Name", "Description", "QueryText",
+                         "IsActive", "CreatedById", "CreatedDate", "ModifiedById", "ModifiedDate")
+                    VALUES (:cid, :name, :desc, :qt, :active, :uid, :now, :uid, :now)
+                    RETURNING "SavedQueryId"
+                """),
+                {
+                    "cid": body.connection_id,
+                    "name": body.name,
+                    "desc": body.description,
+                    "qt": body.query_text,
+                    "active": True,
+                    "uid": user["user_id"],
+                    "now": now,
+                },
+            ).fetchone()
+        else:
+            new_id_row = conn.execute(
+                text(f"""
+                    INSERT INTO {q_table}
+                        ("ConnectionId", "Name", "Description", "QueryText",
+                         "IsActive", "CreatedById", "CreatedDate", "ModifiedById", "ModifiedDate")
+                    OUTPUT INSERTED."SavedQueryId"
+                    VALUES (:cid, :name, :desc, :qt, :active, :uid, :now, :uid, :now)
+                """),
+                {
+                    "cid": body.connection_id,
+                    "name": body.name,
+                    "desc": body.description,
+                    "qt": body.query_text,
+                    "active": True,
+                    "uid": user["user_id"],
+                    "now": now,
+                },
+            ).fetchone()
         new_id = str(new_id_row[0])
 
         for p in body.parameters:
@@ -545,9 +558,7 @@ def list_queries(
     where_sql = "WHERE " + " AND ".join(where_clauses)
 
     if is_admin:
-        join_sql = f'LEFT JOIN {uca_table} uca ON uca."ConnectionId" = q."ConnectionId" AND uca."UserId" = :stub'
-        bind["stub"] = user["user_id"]  # unused but keeps param count consistent; simpler to always join
-        join_sql = ""  # no join needed for admins
+        join_sql = ""  # admin sees all active queries; no access-filter join needed
     else:
         join_sql = f'JOIN {uca_table} uca ON uca."ConnectionId" = q."ConnectionId" AND uca."UserId" = :uid'
 
@@ -568,12 +579,51 @@ def list_queries(
             bind,
         ).fetchall()
 
+        # Batch-fetch all parameters for the returned query IDs — avoids N+1 queries.
+        if rows:
+            p_table = qi(schema, "QueryParameters", db_type)
+            query_ids = [str(r[0]) for r in rows]
+            # SQLAlchemy text() doesn't support list expansion natively; build a safe
+            # parameterised IN clause using sequentially numbered bind names.
+            in_params = {f"qid{i}": qid for i, qid in enumerate(query_ids)}
+            in_clause = ", ".join(f":qid{i}" for i in range(len(query_ids)))
+            param_rows = conn.execute(
+                text(f"""
+                    SELECT "SavedQueryId", "ParameterId", "Name", "Label", "ParamType",
+                           "IsRequired", "DefaultValue", "SelectOptions", "DisplayOrder"
+                    FROM {p_table}
+                    WHERE "SavedQueryId" IN ({in_clause})
+                    ORDER BY "SavedQueryId", "DisplayOrder" ASC, "ParameterId" ASC
+                """),
+                in_params,
+            ).fetchall()
+        else:
+            param_rows = []
+
+    # Index parameters by SavedQueryId.
+    params_by_qid: dict[str, list[dict]] = {}
+    for pr in param_rows:
+        qid = str(pr[0])
+        if qid not in params_by_qid:
+            params_by_qid[qid] = []
+        params_by_qid[qid].append(
+            {
+                "parameter_id": str(pr[1]),
+                "name": pr[2],
+                "label": pr[3],
+                "param_type": pr[4],
+                "is_required": bool(pr[5]),
+                "default_value": pr[6],
+                "select_options": json.loads(pr[7]) if pr[7] else None,
+                "display_order": pr[8],
+            }
+        )
+
     result = []
     for r in rows:
         qid = str(r[0])
-        params = _fetch_parameters(qid)
         item = {
-            "saved_query_id": qid,
+            "id": qid,
             "connection_id": str(r[1]),
             "connection_name": r[2],
             "name": r[3],
@@ -581,7 +631,7 @@ def list_queries(
             "created_date": r[6].isoformat() if hasattr(r[6], "isoformat") else str(r[6]),
             "modified_date": r[7].isoformat() if hasattr(r[7], "isoformat") else str(r[7]),
             "created_by_username": r[8],
-            "parameters": params,
+            "parameters": params_by_qid.get(qid, []),
         }
         if is_power_plus:
             item["query_text"] = r[5]

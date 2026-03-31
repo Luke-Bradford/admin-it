@@ -160,8 +160,8 @@ function QueryEditorModal({ mode, initial, connections, onClose, onSaved }) {
         name: p.name,
         label: p.label,
         type: p.param_type,
-        options: p.options ? p.options.join(',') : '',
-        required: p.required,
+        options: p.select_options ? p.select_options.join(',') : '',
+        required: p.is_required,
       }));
     }
     return [];
@@ -202,11 +202,11 @@ function QueryEditorModal({ mode, initial, connections, onClose, onSaved }) {
         name: p.name,
         label: p.label,
         param_type: p.type,
-        required: p.required,
+        is_required: p.required,
         display_order: i,
       };
       if (p.type === 'select') {
-        base.options = p.options
+        base.select_options = p.options
           .split(',')
           .map((s) => s.trim())
           .filter(Boolean);
@@ -460,12 +460,20 @@ function RunModal({ query, onClose }) {
     setValues((v) => ({ ...v, [name]: value }));
   }
 
+  function stringifyValues(vals) {
+    const out = {};
+    for (const [k, v] of Object.entries(vals)) {
+      out[k] = String(v);
+    }
+    return out;
+  }
+
   async function runQuery(targetPage) {
     setRunning(true);
     setRunError(null);
 
     const payload = {
-      parameter_values: values,
+      parameters: stringifyValues(values),
       page: targetPage,
       page_size: PAGE_SIZE,
     };
@@ -494,7 +502,7 @@ function RunModal({ query, onClose }) {
   async function handleExport(format) {
     setExporting(true);
     try {
-      const payload = { parameter_values: values, format };
+      const payload = { parameters: stringifyValues(values), format };
       const res = await fetch(`/api/queries/${query.id}/export`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeader() },
@@ -639,18 +647,21 @@ function RunModal({ query, onClose }) {
                   )}
                   {result.rows.map((row, ri) => (
                     <tr key={ri} className="hover:bg-gray-50">
-                      {row.map((cell, ci) => (
-                        <td
-                          key={ci}
-                          className="px-3 py-2 text-gray-700 whitespace-nowrap max-w-xs truncate"
-                        >
-                          {cell === null ? (
-                            <span className="text-gray-300">NULL</span>
-                          ) : (
-                            String(cell)
-                          )}
-                        </td>
-                      ))}
+                      {result.columns.map((col) => {
+                        const cell = row[col];
+                        return (
+                          <td
+                            key={col}
+                            className="px-3 py-2 text-gray-700 whitespace-nowrap max-w-xs truncate"
+                          >
+                            {cell === null || cell === undefined ? (
+                              <span className="text-gray-300">NULL</span>
+                            ) : (
+                              String(cell)
+                            )}
+                          </td>
+                        );
+                      })}
                     </tr>
                   ))}
                 </tbody>
