@@ -127,6 +127,61 @@ CREATE TABLE IF NOT EXISTS "__SCHEMA__"."Secrets" (
 );
 
 -- ──────────────────────────────────────────────
+-- COLUMN MASKS
+-- ──────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS "__SCHEMA__"."ColumnMasks" (
+    "MaskId"       UUID         NOT NULL DEFAULT gen_random_uuid(),
+    "ConnectionId" UUID         NOT NULL,
+    "SchemaName"   VARCHAR(128) NOT NULL,
+    "TableName"    VARCHAR(128) NOT NULL,
+    "ColumnName"   VARCHAR(128) NOT NULL,
+    "CreatedById"  UUID,
+    "CreatedDate"  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    PRIMARY KEY ("MaskId"),
+    UNIQUE ("ConnectionId", "SchemaName", "TableName", "ColumnName"),
+    FOREIGN KEY ("ConnectionId") REFERENCES "__SCHEMA__"."Connections" ("ConnectionId")
+);
+
+-- ──────────────────────────────────────────────
+-- SAVED QUERIES and QUERY PARAMETERS
+-- ──────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS "__SCHEMA__"."SavedQueries" (
+    "SavedQueryId" UUID         NOT NULL DEFAULT gen_random_uuid(),
+    "ConnectionId" UUID         NOT NULL,
+    "Name"         VARCHAR(255) NOT NULL,
+    "Description"  VARCHAR(1000),
+    "QueryText"    TEXT         NOT NULL,
+    "IsActive"     BOOLEAN      NOT NULL DEFAULT TRUE,
+    "CreatedById"  UUID,
+    "CreatedDate"  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    "ModifiedById" UUID,
+    "ModifiedDate" TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    PRIMARY KEY ("SavedQueryId"),
+    UNIQUE ("ConnectionId", "Name"),
+    FOREIGN KEY ("ConnectionId") REFERENCES "__SCHEMA__"."Connections" ("ConnectionId"),
+    FOREIGN KEY ("CreatedById")  REFERENCES "__SCHEMA__"."Users" ("UserId"),
+    FOREIGN KEY ("ModifiedById") REFERENCES "__SCHEMA__"."Users" ("UserId")
+);
+
+CREATE TABLE IF NOT EXISTS "__SCHEMA__"."QueryParameters" (
+    "ParameterId"   UUID         NOT NULL DEFAULT gen_random_uuid(),
+    "SavedQueryId"  UUID         NOT NULL,
+    "Name"          VARCHAR(100) NOT NULL,
+    "Label"         VARCHAR(255) NOT NULL,
+    "ParamType"     VARCHAR(20)  NOT NULL,
+    "IsRequired"    BOOLEAN      NOT NULL DEFAULT TRUE,
+    "DefaultValue"  VARCHAR(500),
+    "SelectOptions" TEXT,
+    "DisplayOrder"  INT          NOT NULL DEFAULT 0,
+    PRIMARY KEY ("ParameterId"),
+    UNIQUE ("SavedQueryId", "Name"),
+    CONSTRAINT chk_query_param_type CHECK ("ParamType" IN ('text', 'number', 'date', 'boolean', 'select')),
+    FOREIGN KEY ("SavedQueryId") REFERENCES "__SCHEMA__"."SavedQueries" ("SavedQueryId")
+);
+
+-- ──────────────────────────────────────────────
 -- AUDIT LOG
 -- ──────────────────────────────────────────────
 
@@ -140,7 +195,7 @@ CREATE TABLE IF NOT EXISTS "__SCHEMA__"."audit_log" (
     old_data    JSONB,
     new_data    JSONB,
     PRIMARY KEY (id),
-    CONSTRAINT audit_log_action_check CHECK (action IN ('INSERT', 'UPDATE', 'DELETE'))
+    CONSTRAINT audit_log_action_check CHECK (action IN ('INSERT', 'UPDATE', 'DELETE', 'ACCESS', 'EXPORT'))
 );
 
 -- ──────────────────────────────────────────────
@@ -173,6 +228,7 @@ BEGIN
             WHEN 'Connections'          THEN OLD."ConnectionId"
             WHEN 'ConnectionPermissions' THEN OLD."PermissionId"
             WHEN 'Secrets'              THEN OLD."SecretId"
+            WHEN 'SavedQueries'         THEN OLD."SavedQueryId"
             ELSE NULL
         END;
         INSERT INTO "__SCHEMA__"."audit_log"
@@ -186,6 +242,7 @@ BEGIN
             WHEN 'Connections'          THEN NEW."ConnectionId"
             WHEN 'ConnectionPermissions' THEN NEW."PermissionId"
             WHEN 'Secrets'              THEN NEW."SecretId"
+            WHEN 'SavedQueries'         THEN NEW."SavedQueryId"
             ELSE NULL
         END;
         INSERT INTO "__SCHEMA__"."audit_log"
@@ -230,6 +287,11 @@ CREATE TRIGGER _audit
     AFTER INSERT OR UPDATE OR DELETE ON "__SCHEMA__"."Secrets"
     FOR EACH ROW EXECUTE FUNCTION "__SCHEMA__"._audit_trigger();
 
+DROP TRIGGER IF EXISTS _audit ON "__SCHEMA__"."SavedQueries";
+CREATE TRIGGER _audit
+    AFTER INSERT OR UPDATE OR DELETE ON "__SCHEMA__"."SavedQueries"
+    FOR EACH ROW EXECUTE FUNCTION "__SCHEMA__"._audit_trigger();
+
 -- ──────────────────────────────────────────────
 -- SEED DATA
 -- All inserts use ON CONFLICT DO NOTHING so the script is safe to re-run.
@@ -242,6 +304,10 @@ ON CONFLICT ("RoleName") DO NOTHING;
 
 INSERT INTO "__SCHEMA__"."Roles" ("RoleId", "RoleName")
 VALUES (gen_random_uuid(), 'Admin')
+ON CONFLICT ("RoleName") DO NOTHING;
+
+INSERT INTO "__SCHEMA__"."Roles" ("RoleId", "RoleName")
+VALUES (gen_random_uuid(), 'PowerUser')
 ON CONFLICT ("RoleName") DO NOTHING;
 
 INSERT INTO "__SCHEMA__"."Roles" ("RoleId", "RoleName")

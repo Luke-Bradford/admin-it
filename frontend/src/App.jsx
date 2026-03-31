@@ -11,6 +11,7 @@ import ConnectionMasksPage from './pages/ConnectionMasksPage';
 import TableBrowserPage from './pages/TableBrowserPage';
 import DataBrowserPage from './pages/DataBrowserPage';
 import UsersPage from './pages/UsersPage';
+import SavedQueriesPage from './pages/SavedQueriesPage';
 import ProfilePage from './pages/ProfilePage';
 import Layout from './components/Layout';
 import AppShell from './components/AppShell';
@@ -133,6 +134,16 @@ export default function App() {
             <RequireAuth>
               <AppShell>
                 <UsersPage />
+              </AppShell>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/queries"
+          element={
+            <RequireAuth>
+              <AppShell>
+                <SavedQueriesPage />
               </AppShell>
             </RequireAuth>
           }

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
-from app.utils.auth_dependency import verify_token
+from app.utils.auth_dependency import ADMIN_ROLES, verify_token
 from app.utils.db_helpers import get_backend
 from app.utils.password import hash_password
 from app.utils.sql_helpers import quote_ident as qi
@@ -17,14 +17,13 @@ from app.utils.sql_helpers import quote_ident as qi
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-ADMIN_ROLES = {"Admin", "SystemAdmin"}
-
 # Role precedence used to enforce "cannot grant a role higher than your own".
 # Higher number = higher privilege. Any role not listed is treated as 0.
 ROLE_PRECEDENCE = {
     "EndUser": 1,
-    "Admin": 2,
-    "SystemAdmin": 3,
+    "PowerUser": 2,
+    "Admin": 3,
+    "SystemAdmin": 4,
 }
 
 
@@ -33,7 +32,7 @@ ROLE_PRECEDENCE = {
 # ---------------------------------------------------------------------------
 
 
-RoleName = Literal["EndUser", "Admin", "SystemAdmin"]
+RoleName = Literal["EndUser", "PowerUser", "Admin", "SystemAdmin"]
 
 # Columns allowed in the dynamic PATCH SET clause — prevents any possibility
 # of an unexpected key reaching the raw SQL template.

@@ -23,15 +23,13 @@ import pyodbc
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 
-from app.utils.auth_dependency import verify_token
+from app.utils.auth_dependency import ADMIN_ROLES, verify_token
 from app.utils.connection_crypto import decrypt_credentials
 from app.utils.db_helpers import get_backend
 from app.utils.sql_helpers import quote_ident as qi
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-ADMIN_ROLES = {"Admin", "SystemAdmin"}
 
 # Maximum time (seconds) to wait for a single query on a target database.
 # The pyodbc connect() timeout covers only the connection handshake; this
