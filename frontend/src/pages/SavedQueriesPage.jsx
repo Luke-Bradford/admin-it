@@ -8,6 +8,7 @@ import Modal, { ModalBody, ModalFooter } from '../components/ui/Modal';
 import EmptyState from '../components/ui/EmptyState';
 
 const POWER_AND_ABOVE = new Set(['PowerUser', 'Admin', 'SystemAdmin']);
+const ADMIN_ROLES = new Set(['Admin', 'SystemAdmin']);
 
 const PARAM_TYPES = ['text', 'number', 'date', 'boolean', 'select'];
 
@@ -99,14 +100,14 @@ function ParamRow({ param, index, onChange, onRemove }) {
       <div className="col-span-1 flex items-center justify-center">
         <input
           type="checkbox"
-          checked={param.required}
+          checked={param.required ?? false}
           onChange={(e) => set('required', e.target.checked)}
           title="Required"
           className="h-4 w-4 rounded border-gray-300 text-brand-600"
         />
       </div>
       {/* Remove */}
-      <div className="col-span-0 flex items-center justify-end">
+      <div className="flex items-center justify-end">
         <button
           type="button"
           onClick={() => onRemove(index)}
@@ -536,7 +537,7 @@ function RunModal({ query, onClose }) {
   }
 
   const params = query.parameters ?? [];
-  const totalPages = result ? Math.max(1, Math.ceil(result.total / PAGE_SIZE)) : 1;
+  const totalPages = result ? Math.max(1, result.total_pages ?? 1) : 1;
 
   return (
     <Modal title={query.name} onClose={onClose} size="lg">
@@ -555,7 +556,7 @@ function RunModal({ query, onClose }) {
                 <div key={p.name}>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     {p.label}
-                    {p.required && <span className="text-red-600 ml-0.5">*</span>}
+                    {p.is_required && <span className="text-red-600 ml-0.5">*</span>}
                   </label>
                   <ParamInput
                     param={p}
@@ -595,10 +596,7 @@ function RunModal({ query, onClose }) {
             {/* Toolbar */}
             <div className="px-6 py-2 flex items-center justify-between border-b border-gray-100 bg-gray-50 shrink-0">
               <span className="text-xs text-gray-500">
-                {result.total.toLocaleString()} row{result.total !== 1 ? 's' : ''}
-                {result.truncated && (
-                  <span className="ml-1 text-amber-600">(export truncated at 10,000)</span>
-                )}
+                {result.total_count.toLocaleString()} row{result.total_count !== 1 ? 's' : ''}
               </span>
               <div className="flex items-center gap-2">
                 <button
@@ -711,11 +709,11 @@ function ParamInput({ param, value, onChange }) {
       </div>
     );
   }
-  if (param.param_type === 'select' && param.options?.length > 0) {
+  if (param.param_type === 'select' && param.select_options?.length > 0) {
     return (
-      <Select value={value} onChange={(e) => onChange(e.target.value)} required={param.required}>
+      <Select value={value} onChange={(e) => onChange(e.target.value)} required={param.is_required}>
         <option value="">— select —</option>
-        {param.options.map((opt) => (
+        {param.select_options.map((opt) => (
           <option key={opt} value={opt}>
             {opt}
           </option>
@@ -729,7 +727,7 @@ function ParamInput({ param, value, onChange }) {
         type="date"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        required={param.required}
+        required={param.is_required}
       />
     );
   }
@@ -739,7 +737,7 @@ function ParamInput({ param, value, onChange }) {
         type="number"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        required={param.required}
+        required={param.is_required}
         step="any"
       />
     );
@@ -749,7 +747,7 @@ function ParamInput({ param, value, onChange }) {
       type="text"
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      required={param.required}
+      required={param.is_required}
       placeholder={param.label}
     />
   );
@@ -790,6 +788,7 @@ function queriesReducer(state, action) {
 export default function SavedQueriesPage() {
   const user = useContext(UserContext);
   const canManage = hasRole(user, POWER_AND_ABOVE);
+  const canDelete = hasRole(user, ADMIN_ROLES);
 
   const [state, dispatch] = useReducer(queriesReducer, {
     loading: true,
@@ -959,7 +958,7 @@ export default function SavedQueriesPage() {
                             Edit
                           </button>
                         )}
-                        {canManage && (
+                        {canDelete && (
                           <button
                             onClick={() => setModal({ type: 'delete', query: q })}
                             className="text-sm text-red-600 hover:text-red-800 transition-colors"
