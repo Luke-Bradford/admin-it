@@ -5,7 +5,9 @@
 # it in ticket #76.  No inheritance is required — Python's structural subtyping
 # means any class with the right shape satisfies the Protocol.
 
-from typing import Protocol
+from datetime import datetime
+from typing import Literal, Protocol
+from uuid import UUID
 
 from sqlalchemy.engine import Engine
 
@@ -36,10 +38,20 @@ class CoreBackend(Protocol):
         """Fetch a secret value from the Secrets table by SecretType."""
         ...
 
-    def get_audit_records(self) -> list[dict]:
-        """Return paginated audit records.
+    def get_audit_records(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        table_name: str | None = None,
+        action: Literal["INSERT", "UPDATE", "DELETE", "ACCESS", "EXPORT"] | None = None,
+        changed_by: UUID | None = None,
+        record_id: UUID | None = None,
+        from_dt: datetime | None = None,
+        to_dt: datetime | None = None,
+    ) -> dict:
+        """Return paginated, filtered audit log entries.
 
-        Not yet implemented — placeholder for ticket #77.
-        Raises NotImplementedError on all current backends.
+        Returns a dict with keys: entries, total_count, page, page_size, total_pages.
+        Raises NotImplementedError on backends that do not yet support audit.
         """
         ...

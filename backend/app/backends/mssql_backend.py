@@ -12,7 +12,11 @@
 
 import json
 import logging
+import math
 from contextvars import ContextVar, Token
+from datetime import datetime, timedelta
+from typing import Literal
+from uuid import UUID
 
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
@@ -110,32 +114,101 @@ class MSSQLBackend:
         logger.error("[mssql_backend] Secret '%s' not found in schema '%s'", secret_type, self.schema)
         raise RuntimeError(f"Secret '{secret_type}' not found.")
 
-    def get_audit_records(self) -> list[dict]:
-        """Return the most recent 1000 audit log entries, newest first."""
+    def get_audit_records(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        table_name: str | None = None,
+        action: Literal["INSERT", "UPDATE", "DELETE", "ACCESS", "EXPORT"] | None = None,
+        changed_by: UUID | None = None,
+        record_id: UUID | None = None,
+        from_dt: datetime | None = None,
+        to_dt: datetime | None = None,
+    ) -> dict:
+        """Return paginated, filtered audit log entries with username resolution."""
         schema = self.schema
+
+        # Apply 24h default only when no date or record filter is present
+        if record_id is None and from_dt is None and to_dt is None:
+            from_dt = datetime.utcnow() - timedelta(hours=24)
+
+        where_clauses = ["1=1"]
+        params: dict = {}
+
+        if table_name is not None:
+            where_clauses.append("a.[table_name] = :table_name")
+            params["table_name"] = table_name
+
+        if action is not None:
+            where_clauses.append("a.[action] = :action")
+            params["action"] = action
+
+        if changed_by is not None:
+            where_clauses.append("a.[changed_by] = :changed_by")
+            params["changed_by"] = str(changed_by)
+
+        if record_id is not None:
+            where_clauses.append("a.[record_id] = :record_id")
+            params["record_id"] = str(record_id)
+
+        if from_dt is not None:
+            where_clauses.append("a.[changed_at] >= :from_dt")
+            params["from_dt"] = from_dt
+
+        if to_dt is not None:
+            where_clauses.append("a.[changed_at] <= :to_dt")
+            params["to_dt"] = to_dt
+
+        where_sql = " AND ".join(where_clauses)
+        offset = (page - 1) * page_size
+
+        rows_sql = text(f"""
+            SELECT
+                a.[id], a.[table_name], a.[record_id], a.[action],
+                a.[changed_by], u.[Username] AS [changed_by_username],
+                a.[changed_at], a.[old_data], a.[new_data]
+            FROM [{schema}].[audit_log] a
+            LEFT JOIN [{schema}].[Users] u ON a.[changed_by] = u.[UserId]
+            WHERE {where_sql}
+            ORDER BY a.[changed_at] DESC
+            OFFSET :offset ROWS FETCH NEXT :page_size ROWS ONLY
+        """)
+        count_sql = text(f"""
+            SELECT COUNT(*) AS total
+            FROM [{schema}].[audit_log] a
+            WHERE {where_sql}
+        """)
+
+        row_params = {**params, "offset": offset, "page_size": page_size}
+        count_params = {k: v for k, v in params.items()}
+
         with self._engine.connect() as conn:
-            rows = conn.execute(
-                text(f"""
-                    SELECT TOP 1000 id, table_name, record_id, action,
-                                    changed_by, changed_at, old_data, new_data
-                    FROM {qi(schema, "audit_log", "mssql")}
-                    ORDER BY changed_at DESC
-                """)
-            ).fetchall()
-        return [
-            {
-                "id": str(m["id"]),
-                "table_name": m["table_name"],
-                "record_id": str(m["record_id"]) if m["record_id"] else None,
-                "action": m["action"],
-                "changed_by": str(m["changed_by"]) if m["changed_by"] else None,
-                "changed_at": m["changed_at"].isoformat() if m["changed_at"] else None,
-                "old_data": _parse_json(m["old_data"]),
-                "new_data": _parse_json(m["new_data"]),
-            }
-            for r in rows
-            for m in (r._mapping,)
-        ]
+            rows = conn.execute(rows_sql, row_params).fetchall()
+            total_count = conn.execute(count_sql, count_params).scalar() or 0
+
+        total_pages = math.ceil(total_count / page_size) if total_count else 1
+
+        return {
+            "entries": [
+                {
+                    "id": str(m["id"]),
+                    "table_name": m["table_name"],
+                    "record_id": str(m["record_id"]) if m["record_id"] else None,
+                    "action": m["action"],
+                    "changed_by": str(m["changed_by"]) if m["changed_by"] else None,
+                    "changed_by_username": m["changed_by_username"],
+                    "changed_at": m["changed_at"].isoformat() if m["changed_at"] else None,
+                    "old_data": _parse_json(m["old_data"]),
+                    "new_data": _parse_json(m["new_data"]),
+                }
+                for r in rows
+                for m in (r._mapping,)
+            ],
+            "total_count": total_count,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+        }
 
 
 def _parse_json(value: str | None):

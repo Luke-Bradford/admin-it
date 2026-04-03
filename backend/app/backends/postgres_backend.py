@@ -11,7 +11,10 @@
 import logging
 import os
 from contextvars import ContextVar, Token
+from datetime import datetime
+from typing import Literal
 from urllib.parse import quote_plus
+from uuid import UUID
 
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Engine
@@ -134,32 +137,19 @@ class PostgreSQLBackend:
         logger.error("[postgres_backend] Secret '%s' not found in schema '%s'", secret_type, schema)
         raise RuntimeError(f"Secret '{secret_type}' not found.")
 
-    def get_audit_records(self) -> list[dict]:
-        """Return the most recent 1000 audit log entries, newest first."""
-        schema = self.schema
-        with self._engine.connect() as conn:
-            rows = conn.execute(
-                text(f"""
-                    SELECT id, table_name, record_id, action,
-                           changed_by, changed_at, old_data, new_data
-                    FROM {qi(schema, "audit_log", "postgres")}
-                    ORDER BY changed_at DESC
-                    LIMIT 1000
-                """)
-            ).fetchall()
-        return [
-            {
-                "id": str(r._mapping["id"]),
-                "table_name": r._mapping["table_name"],
-                "record_id": str(r._mapping["record_id"]) if r._mapping["record_id"] else None,
-                "action": r._mapping["action"],
-                "changed_by": str(r._mapping["changed_by"]) if r._mapping["changed_by"] else None,
-                "changed_at": r._mapping["changed_at"].isoformat() if r._mapping["changed_at"] else None,
-                "old_data": r._mapping["old_data"],
-                "new_data": r._mapping["new_data"],
-            }
-            for r in rows
-        ]
+    def get_audit_records(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        table_name: str | None = None,
+        action: Literal["INSERT", "UPDATE", "DELETE", "ACCESS", "EXPORT"] | None = None,
+        changed_by: UUID | None = None,
+        record_id: UUID | None = None,
+        from_dt: datetime | None = None,
+        to_dt: datetime | None = None,
+    ) -> dict:
+        """Paginated, filtered audit log — not yet implemented for PostgreSQL."""
+        raise NotImplementedError("Audit log is not yet implemented for the PostgreSQL backend.")
 
 
 def set_current_user(uid: str | None) -> "Token[str | None]":
