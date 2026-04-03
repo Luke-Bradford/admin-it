@@ -239,7 +239,10 @@ The backend stores `changed_at` as server-local time (no timezone awareness). Th
 - Action badge — colour-coded using the existing `Badge` component: INSERT (green), UPDATE (yellow), DELETE (red), EXPORT (blue), ACCESS/null (grey)
 - `table_name`
 - Record ID — rendered as a `<button>` with `title={fullUuid}` (native tooltip showing full UUID on hover); visually truncated to first 8 chars + `…`; clicking adds it as a `recordId` filter. If `record_id` is null, render `—`.
-- `changed_by_username` — if both `changed_by_username` and `changed_by` are null, render `System` (indicates a trigger or automated change with no user context).
+- `changed_by_username` — rendering rules:
+  - Username resolved: show username.
+  - `changed_by` is null on a core schema table (Users, Connections, ConnectionPermissions, Secrets, ColumnMasks, SavedQueries): render `Direct DB access` in amber — indicates the change was made outside admin-it (e.g. via SSMS). The trigger fired but no admin-it session context was present.
+  - `changed_by` is null on a non-schema table or for action types ACCESS/EXPORT: render `System` (automated/internal operation with no user attribution).
 
 **Expanded diff view:** renders inside the accordion row when `expandedRows[entry.id]` is true.
 
