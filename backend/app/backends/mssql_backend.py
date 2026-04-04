@@ -173,6 +173,8 @@ class MSSQLBackend:
             ORDER BY a.[changed_at] DESC
             OFFSET :offset ROWS FETCH NEXT :page_size ROWS ONLY
         """)
+        # No LEFT JOIN on Users here — all WHERE clauses reference only a.[...] columns.
+        # If a future filter on changed_by_username is added, the JOIN must be added here too.
         count_sql = text(f"""
             SELECT COUNT(*) AS total
             FROM [{schema}].[audit_log] a

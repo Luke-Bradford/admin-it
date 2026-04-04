@@ -86,6 +86,9 @@ function buildQueryString(filters, page, pageSize) {
     params.set('from_dt', daysAgoStr(30) + 'T00:00:00');
     params.set('to_dt', todayStr() + 'T23:59:59');
   } else if (filters.quickPreset === 'custom' || filters.quickPreset === null) {
+    // quickPreset === null: record-ID mode — dates are always null, no date params sent (full lifecycle).
+    // quickPreset === 'custom': only send when both bounds are filled; half-filled range is suppressed
+    // at the fetch level so we never request with only one bound.
     if (filters.fromDate) params.set('from_dt', filters.fromDate + 'T00:00:00');
     if (filters.toDate) params.set('to_dt', filters.toDate + 'T23:59:59');
   }
@@ -333,8 +336,13 @@ export default function AuditLogPage() {
     expandedRows,
   } = state;
 
-  // Fetch entries whenever filters, page, or pageSize change
+  // Fetch entries whenever filters, page, or pageSize change.
+  // Suppress fetch when a custom date range is half-filled — wait for both bounds.
+  const isHalfFilledCustom =
+    filters.quickPreset === 'custom' && Boolean(filters.fromDate) !== Boolean(filters.toDate);
+
   useEffect(() => {
+    if (isHalfFilledCustom) return;
     let cancelled = false;
     dispatch({ type: 'LOADING' });
     const qs = buildQueryString(filters, page, pageSize);
@@ -355,7 +363,7 @@ export default function AuditLogPage() {
     return () => {
       cancelled = true;
     };
-  }, [filters, page, pageSize]);
+  }, [filters, page, pageSize, isHalfFilledCustom]);
 
   // Fetch users for dropdown once on mount
   useEffect(() => {
