@@ -55,3 +55,11 @@ class CoreBackend(Protocol):
         Raises NotImplementedError on backends that do not yet support audit.
         """
         ...
+
+    def get_audit_users(self) -> list[dict]:
+        """Return active users for the audit log filter dropdown.
+
+        Returns a list of dicts with keys: id, username.
+        Raises NotImplementedError on backends that do not yet support audit.
+        """
+        ...

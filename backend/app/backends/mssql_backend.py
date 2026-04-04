@@ -14,7 +14,7 @@ import json
 import logging
 import math
 from contextvars import ContextVar, Token
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 from uuid import UUID
 
@@ -130,7 +130,7 @@ class MSSQLBackend:
 
         # Apply 24h default only when no date or record filter is present
         if record_id is None and from_dt is None and to_dt is None:
-            from_dt = datetime.utcnow() - timedelta(hours=24)
+            from_dt = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=24)
 
         where_clauses = ["1=1"]
         params: dict = {}
@@ -180,11 +180,11 @@ class MSSQLBackend:
         """)
 
         row_params = {**params, "offset": offset, "page_size": page_size}
-        count_params = {k: v for k, v in params.items()}
 
         with self._engine.connect() as conn:
-            rows = conn.execute(rows_sql, row_params).fetchall()
-            total_count = conn.execute(count_sql, count_params).scalar() or 0
+            with conn.begin():
+                rows = conn.execute(rows_sql, row_params).fetchall()
+                total_count = conn.execute(count_sql, params).scalar() or 0
 
         total_pages = math.ceil(total_count / page_size) if total_count else 1
 
@@ -209,6 +209,20 @@ class MSSQLBackend:
             "page_size": page_size,
             "total_pages": total_pages,
         }
+
+    def get_audit_users(self) -> list[dict]:
+        """Return active users for the audit log filter dropdown."""
+        schema = self.schema
+        with self._engine.connect() as conn:
+            rows = conn.execute(
+                text(f"""
+                    SELECT [UserId], [Username]
+                    FROM [{schema}].[Users]
+                    WHERE [IsActive] = 1
+                    ORDER BY [Username]
+                """)
+            ).fetchall()
+        return [{"id": str(r._mapping["UserId"]), "username": r._mapping["Username"]} for r in rows]
 
 
 def _parse_json(value: str | None):

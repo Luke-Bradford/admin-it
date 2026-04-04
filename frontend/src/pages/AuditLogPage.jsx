@@ -169,13 +169,16 @@ function DiffView({ oldData, newData }) {
   const newObj = Array.isArray(newData) ? (newData[0] ?? null) : newData;
 
   const allKeys = [...new Set([...Object.keys(oldObj ?? {}), ...Object.keys(newObj ?? {})])];
-  const changed = allKeys.filter(
-    (k) => JSON.stringify(oldObj?.[k] ?? null) !== JSON.stringify(newObj?.[k] ?? null)
+  // Compute changed keys once so the render doesn't re-stringify per row
+  const changedKeys = new Set(
+    allKeys.filter(
+      (k) => JSON.stringify(oldObj?.[k] ?? null) !== JSON.stringify(newObj?.[k] ?? null)
+    )
   );
-  const unchanged = allKeys.filter(
-    (k) => JSON.stringify(oldObj?.[k] ?? null) === JSON.stringify(newObj?.[k] ?? null)
-  );
-  const sortedKeys = [...changed, ...unchanged];
+  const sortedKeys = [
+    ...allKeys.filter((k) => changedKeys.has(k)),
+    ...allKeys.filter((k) => !changedKeys.has(k)),
+  ];
 
   if (sortedKeys.length === 0) {
     return (
@@ -203,8 +206,7 @@ function DiffView({ oldData, newData }) {
         </thead>
         <tbody>
           {sortedKeys.map((k) => {
-            const isChanged =
-              JSON.stringify(oldObj?.[k] ?? null) !== JSON.stringify(newObj?.[k] ?? null);
+            const isChanged = changedKeys.has(k);
             const oldVal = oldObj?.[k] !== undefined ? String(oldObj[k]) : null;
             const newVal = newObj?.[k] !== undefined ? String(newObj[k]) : null;
             return (
@@ -389,7 +391,10 @@ export default function AuditLogPage() {
     dispatch({ type: 'SET_FILTER', patch: initialFilters });
   }
 
-  // Build active chip list
+  // Build active chip list.
+  // quickPreset === null means record-ID mode: date range was cleared when the record ID was set.
+  // In that state no date chip is shown — only the Record chip below. Removing the Record chip
+  // restores quickPreset to '24h', so the page never stays in a dateless, recordless state.
   const chips = [];
   if (filters.quickPreset === '24h') chips.push({ key: 'date', label: 'Last 24 hours' });
   else if (filters.quickPreset === '7d') chips.push({ key: 'date', label: 'Last 7 days' });

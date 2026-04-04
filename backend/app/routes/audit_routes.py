@@ -5,7 +5,6 @@ from typing import Literal, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.sql import text
 
 from app.utils.auth_dependency import ADMIN_ROLES, verify_token
 from app.utils.db_helpers import get_backend
@@ -63,18 +62,8 @@ def list_audit_users(user: dict = Depends(verify_token)):
         raise HTTPException(status_code=403, detail="Admin role required")
 
     backend = get_backend()
-    schema = backend.schema
     try:
-        with backend._engine.connect() as conn:
-            rows = conn.execute(
-                text(f"""
-                    SELECT [UserId], [Username]
-                    FROM [{schema}].[Users]
-                    WHERE [IsActive] = 1
-                    ORDER BY [Username]
-                """)
-            ).fetchall()
-        return [{"id": str(r._mapping["UserId"]), "username": r._mapping["Username"]} for r in rows]
+        return backend.get_audit_users()
     except NotImplementedError:
         raise HTTPException(
             status_code=501,

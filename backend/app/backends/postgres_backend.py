@@ -151,6 +151,10 @@ class PostgreSQLBackend:
         """Paginated, filtered audit log — not yet implemented for PostgreSQL."""
         raise NotImplementedError("Audit log is not yet implemented for the PostgreSQL backend.")
 
+    def get_audit_users(self) -> list[dict]:
+        """Return active users for the audit log filter dropdown — not yet implemented."""
+        raise NotImplementedError("Audit log is not yet implemented for the PostgreSQL backend.")
+
 
 def set_current_user(uid: str | None) -> "Token[str | None]":
     """Set the per-request user ID for the Postgres audit trigger.
