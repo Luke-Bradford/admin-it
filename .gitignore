@@ -15,3 +15,6 @@ __pycache__/
 .DS_Store
 .env
 /backend/core_connection.enc
+
+# Brainstorming session files
+.superpowers/

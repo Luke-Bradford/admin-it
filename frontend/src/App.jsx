@@ -12,6 +12,7 @@ import TableBrowserPage from './pages/TableBrowserPage';
 import DataBrowserPage from './pages/DataBrowserPage';
 import UsersPage from './pages/UsersPage';
 import SavedQueriesPage from './pages/SavedQueriesPage';
+import AuditLogPage from './pages/AuditLogPage';
 import ProfilePage from './pages/ProfilePage';
 import Layout from './components/Layout';
 import AppShell from './components/AppShell';
@@ -153,7 +154,7 @@ export default function App() {
           element={
             <RequireAuth>
               <AppShell>
-                <ComingSoon title="Audit Log" />
+                <AuditLogPage />
               </AppShell>
             </RequireAuth>
           }
