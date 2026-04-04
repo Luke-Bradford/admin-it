@@ -59,14 +59,19 @@ function isDirectDbAccess(entry) {
   return !entry.changed_by && CORE_TABLES.has(entry.table_name);
 }
 
+function localDateStr(d) {
+  // Use local date parts to avoid UTC-vs-local midnight discrepancy for UTC+ timezones
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  return localDateStr(new Date());
 }
 
 function daysAgoStr(n) {
   const d = new Date();
   d.setDate(d.getDate() - n);
-  return d.toISOString().slice(0, 10);
+  return localDateStr(d);
 }
 
 function buildQueryString(filters, page, pageSize) {
@@ -605,16 +610,23 @@ export default function AuditLogPage() {
                       {entry.table_name}
                     </span>
 
-                    {/* Record ID — truncated with full UUID tooltip */}
+                    {/* Record ID — truncated with full UUID tooltip.
+                        Using span+role rather than <button> to avoid invalid nested button HTML. */}
                     <span className="shrink-0">
                       {entry.record_id ? (
-                        <button
+                        <span
+                          role="button"
+                          tabIndex={0}
                           title={entry.record_id}
-                          className="font-mono text-xs text-blue-600 underline hover:text-blue-800"
+                          className="font-mono text-xs text-blue-600 underline hover:text-blue-800 cursor-pointer"
                           onClick={(e) => handleRecordIdClick(e, entry.record_id)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ')
+                              handleRecordIdClick(e, entry.record_id);
+                          }}
                         >
                           {entry.record_id.slice(0, 8)}…
-                        </button>
+                        </span>
                       ) : (
                         <span className="text-gray-300 text-xs">—</span>
                       )}
