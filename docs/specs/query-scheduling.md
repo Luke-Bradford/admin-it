@@ -244,7 +244,7 @@ All routes in a new file `backend/app/routes/schedule_routes.py`. Every route us
 | Route | Auth | Notes |
 |---|---|---|
 | `GET /api/schedules` | PowerUser+ | Lists all non-deleted schedules. Power users see all. |
-| `POST /api/schedules` | PowerUser+ | Body: name, saved_query_id, cron, timezone, recipients[], attachment_format, subject, body, parameters[]. Validates everything in §6.4. Caller must have access to the saved query. |
+| `POST /api/schedules` | PowerUser+ | Body: name, saved_query_id, cron, timezone, recipients[], attachment_format, subject, body, parameters[]. Validates everything in §6.4. Caller must have access to the saved query. Response includes `scheduler_registered: bool` — `true` if the schedule is live in APScheduler now, `false` if it was written to the DB but the leader worker has not yet picked it up (see §3.2; up to 60s on multi-worker deployments). Same field returned by PATCH/enable/disable. |
 | `GET /api/schedules/{id}` | PowerUser+ | Returns schedule + parameters + last 10 runs. |
 | `PATCH /api/schedules/{id}` | Owner-or-Admin+ | Partial update. `parameters` is full replacement when provided. PATCH with all-None body returns **422**, never silent 2xx. |
 | `DELETE /api/schedules/{id}` | Owner-or-Admin+ | Soft-delete (`IsDeleted=1`); calls `scheduler.remove_job`. |
