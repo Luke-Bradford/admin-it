@@ -6,6 +6,7 @@
 
 import logging
 import smtplib
+import ssl
 from email.message import EmailMessage
 from typing import Literal
 
@@ -49,11 +50,18 @@ def send_email(
     body: str,
     attachment_bytes: bytes | None = None,
     attachment_filename: str | None = None,
+    verify_ssl: bool = True,
 ) -> None:
     """Send a single email synchronously. Raises EmailSendError on failure.
 
     Uses SMTP_SSL for tls_mode='tls', SMTP+STARTTLS for 'starttls', plain SMTP
     for 'none'. Authenticates only if both username and password are provided.
+
+    `verify_ssl` controls TLS certificate verification for both SMTP_SSL and
+    STARTTLS modes. Defaults to True (verify the server certificate against
+    the system trust store). Set to False for self-signed internal SMTP relays
+    — common in self-hosted deployments — but be aware this disables hostname
+    and certificate validation entirely. Has no effect when tls_mode='none'.
     """
     if not to:
         raise EmailSendError("At least one recipient required")
@@ -75,10 +83,16 @@ def send_email(
             filename=attachment_filename,
         )
 
+    if verify_ssl:
+        ssl_context = ssl.create_default_context()
+    else:
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+
     try:
         if tls_mode == "tls":
-            smtp_cls = smtplib.SMTP_SSL
-            with smtp_cls(host, port, timeout=15) as client:
+            with smtplib.SMTP_SSL(host, port, timeout=15, context=ssl_context) as client:
                 if username and password:
                     client.login(username, password)
                 client.send_message(msg)
@@ -86,7 +100,7 @@ def send_email(
             with smtplib.SMTP(host, port, timeout=15) as client:
                 client.ehlo()
                 if tls_mode == "starttls":
-                    client.starttls()
+                    client.starttls(context=ssl_context)
                     client.ehlo()
                 if username and password:
                     client.login(username, password)

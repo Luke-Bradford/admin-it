@@ -28,6 +28,7 @@ const EMPTY_FORM = {
   reply_to_address: '',
   allowlist_enabled: false,
   allowed_domains: [],
+  verify_ssl: true,
 };
 
 export default function SmtpSettingsPage() {
@@ -52,7 +53,14 @@ export default function SmtpSettingsPage() {
   const [testSending, setTestSending] = useState(false);
 
   useEffect(() => {
-    if (!isAdmin) return;
+    // Wait until UserContext has populated. `user === null` means the
+    // /auth/me lookup in App.jsx hasn't returned yet — don't redirect a
+    // legitimate admin to /dashboard before their roles arrive.
+    if (user === null) return;
+    if (!isAdmin) {
+      setLoading(false);
+      return;
+    }
     fetch('/api/settings/smtp', { headers: authHeader() })
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -69,13 +77,15 @@ export default function SmtpSettingsPage() {
           reply_to_address: data.reply_to_address ?? '',
           allowlist_enabled: !!data.allowlist_enabled,
           allowed_domains: data.allowed_domains ?? [],
+          verify_ssl: data.verify_ssl !== false,
         });
         setPasswordSet(!!data.password_set);
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [isAdmin]);
+  }, [isAdmin, user]);
 
+  if (user === null) return <div className="p-6 text-sm text-gray-500">Loading…</div>;
   if (!isAdmin) return <Navigate to="/dashboard" replace />;
 
   function update(field, value) {
@@ -216,7 +226,7 @@ export default function SmtpSettingsPage() {
               min={1}
               max={65535}
               value={form.port}
-              onChange={(e) => update('port', e.target.value)}
+              onChange={(e) => update('port', e.target.value === '' ? '' : Number(e.target.value))}
               className="mt-1 w-full border rounded px-2 py-1.5"
             />
           </label>
@@ -239,6 +249,25 @@ export default function SmtpSettingsPage() {
             ))}
           </div>
         </fieldset>
+
+        <label
+          className={`flex items-start gap-2 text-sm ${form.tls_mode === 'none' ? 'opacity-50' : ''}`}
+        >
+          <input
+            type="checkbox"
+            checked={form.verify_ssl}
+            disabled={form.tls_mode === 'none'}
+            onChange={(e) => update('verify_ssl', e.target.checked)}
+            className="mt-0.5"
+          />
+          <span className="text-gray-700">
+            Verify TLS certificate
+            <span className="block text-xs text-gray-500">
+              Disable only for self-signed internal SMTP relays. Disabling skips hostname and
+              certificate validation entirely.
+            </span>
+          </span>
+        </label>
 
         <label className="block text-sm">
           <span className="text-gray-700">Username (optional)</span>

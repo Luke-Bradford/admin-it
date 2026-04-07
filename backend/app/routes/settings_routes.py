@@ -33,6 +33,9 @@ TlsMode = Literal["none", "starttls", "tls"]
 # Allowlist of Settings keys this router is allowed to read/write. Used to
 # defend against any future code path that might pass a key derived from
 # user input — every key reaching the SQL template must be in this set.
+# Note: this list is small (10 items) and bounded. SQLAlchemy's expanding
+# bindparam generates `IN (:k_1, :k_2, ...)` which is fine on MSSQL up to its
+# 2,100-parameter limit — well above any plausible growth here.
 SMTP_SETTING_KEYS: tuple[str, ...] = (
     "smtp.host",
     "smtp.port",
@@ -43,6 +46,7 @@ SMTP_SETTING_KEYS: tuple[str, ...] = (
     "smtp.reply_to_address",
     "smtp.allowlist_enabled",
     "smtp.allowed_domains",
+    "smtp.verify_ssl",
 )
 
 SMTP_PASSWORD_SECRET = "SMTP_PASSWORD"
@@ -73,6 +77,7 @@ class SmtpSettingsOut(BaseModel):
     reply_to_address: str | None
     allowlist_enabled: bool
     allowed_domains: list[str]
+    verify_ssl: bool
     password_set: bool
 
 
@@ -86,6 +91,7 @@ class SmtpSettingsUpdate(BaseModel):
     reply_to_address: str | None = Field(default=None, max_length=320)
     allowlist_enabled: bool = False
     allowed_domains: list[str] = Field(default_factory=list)
+    verify_ssl: bool = True
 
     @field_validator("from_address")
     @classmethod
@@ -158,20 +164,42 @@ def _read_smtp_settings_rows(conn, schema: str, db_type: str) -> dict[str, Any]:
     return out
 
 
-def _password_is_set(backend) -> bool:
-    try:
-        backend.fetch_secret(SMTP_PASSWORD_SECRET)
-        return True
-    except RuntimeError:
-        return False
+def _password_row_exists(backend) -> bool:
+    """Return True iff a row keyed SMTP_PASSWORD exists in [adm].[Secrets].
+
+    Uses a direct SELECT — does NOT call `fetch_secret`, because that helper
+    raises a generic `RuntimeError` for not-found and would force us to
+    swallow ALL RuntimeErrors here. We only want to treat row-absence as
+    'not set'; any other error (DB down, permission denied) must propagate
+    so the admin sees a real error rather than being told 'no password set'
+    and overwriting a still-encrypted secret.
+    """
+    engine = backend.get_engine()
+    table = qi(backend.schema, "Secrets", backend.db_type)
+    with engine.connect() as conn:
+        row = conn.execute(
+            text(f'SELECT 1 FROM {table} WHERE "SecretType" = :st'),
+            {"st": SMTP_PASSWORD_SECRET},
+        ).fetchone()
+    return row is not None
 
 
 def _load_password(backend) -> str | None:
-    try:
-        token = backend.fetch_secret(SMTP_PASSWORD_SECRET)
-    except RuntimeError:
+    """Return the decrypted SMTP password, or None if no row exists.
+
+    Mirrors `_password_row_exists`: only row-absence yields None. Any
+    decrypt failure propagates as HTTPException(500) via decrypt_value.
+    """
+    engine = backend.get_engine()
+    table = qi(backend.schema, "Secrets", backend.db_type)
+    with engine.connect() as conn:
+        row = conn.execute(
+            text(f'SELECT "SecretValue" FROM {table} WHERE "SecretType" = :st'),
+            {"st": SMTP_PASSWORD_SECRET},
+        ).fetchone()
+    if row is None:
         return None
-    return decrypt_value(backend, token)
+    return decrypt_value(backend, row[0])
 
 
 def _upsert_setting(conn, schema: str, db_type: str, key: str, value: Any, user_id: str, now: datetime) -> None:
@@ -183,7 +211,7 @@ def _upsert_setting(conn, schema: str, db_type: str, key: str, value: Any, user_
     table = qi(schema, "Settings", db_type)
     if db_type == "mssql":
         sql = f"""
-            MERGE {table} AS target
+            MERGE {table} WITH (HOLDLOCK) AS target
             USING (SELECT :k AS k) AS src ON target."SettingKey" = src.k
             WHEN MATCHED THEN UPDATE SET
                 "SettingValue" = :v, "UpdatedAt" = :now, "UpdatedBy" = :uid
@@ -204,30 +232,36 @@ def _upsert_setting(conn, schema: str, db_type: str, key: str, value: Any, user_
 
 
 def _upsert_secret(conn, schema: str, db_type: str, secret_type: str, secret_value: str) -> None:
-    """Upsert a row in [adm].[Secrets] keyed by SecretType."""
+    """Atomically upsert a row in [adm].[Secrets] keyed by SecretType.
+
+    Uses MERGE / ON CONFLICT to avoid a TOCTOU race between two concurrent
+    password updates (which with a separate SELECT-then-INSERT would both
+    see no row and both INSERT, causing a primary-key violation).
+    """
     table = qi(schema, "Secrets", db_type)
-    existing = conn.execute(
-        text(f'SELECT 1 FROM {table} WHERE "SecretType" = :st'),
-        {"st": secret_type},
-    ).fetchone()
-    if existing:
-        conn.execute(
-            text(f'UPDATE {table} SET "SecretValue" = :v WHERE "SecretType" = :st'),
-            {"v": secret_value, "st": secret_type},
-        )
+    desc = "SMTP outbound password (Fernet-encrypted with CONNECTION_KEY)"
+    new_id = str(uuid.uuid4())
+    if db_type == "mssql":
+        sql = f"""
+            MERGE {table} WITH (HOLDLOCK) AS target
+            USING (SELECT :st AS st) AS src ON target."SecretType" = src.st
+            WHEN MATCHED THEN UPDATE SET
+                "SecretValue" = :v
+            WHEN NOT MATCHED THEN
+                INSERT ("SecretId", "SecretType", "SecretDescription", "SecretValue")
+                VALUES (:id, :st, :desc, :v);
+        """
     else:
-        conn.execute(
-            text(f"""
-                INSERT INTO {table} ("SecretId", "SecretType", "SecretDescription", "SecretValue")
-                VALUES (:id, :st, :desc, :v)
-            """),
-            {
-                "id": str(uuid.uuid4()),
-                "st": secret_type,
-                "desc": "SMTP outbound password (Fernet-encrypted with CONNECTION_KEY)",
-                "v": secret_value,
-            },
-        )
+        sql = f"""
+            INSERT INTO {table} ("SecretId", "SecretType", "SecretDescription", "SecretValue")
+            VALUES (:id, :st, :desc, :v)
+            ON CONFLICT ("SecretType") DO UPDATE SET
+                "SecretValue" = EXCLUDED."SecretValue";
+        """
+    conn.execute(
+        text(sql),
+        {"id": new_id, "st": secret_type, "desc": desc, "v": secret_value},
+    )
 
 
 def _build_settings_out(stored: dict[str, Any], password_set: bool) -> SmtpSettingsOut:
@@ -241,6 +275,7 @@ def _build_settings_out(stored: dict[str, Any], password_set: bool) -> SmtpSetti
         reply_to_address=stored.get("reply_to_address"),
         allowlist_enabled=bool(stored.get("allowlist_enabled") or False),
         allowed_domains=list(stored.get("allowed_domains") or []),
+        verify_ssl=bool(stored.get("verify_ssl") if stored.get("verify_ssl") is not None else True),
         password_set=password_set,
     )
 
@@ -257,7 +292,7 @@ def get_smtp_settings(user: dict = Depends(verify_token)) -> SmtpSettingsOut:
     engine = backend.get_engine()
     with engine.connect() as conn:
         stored = _read_smtp_settings_rows(conn, backend.schema, backend.db_type)
-    return _build_settings_out(stored, _password_is_set(backend))
+    return _build_settings_out(stored, _password_row_exists(backend))
 
 
 @router.put("/smtp", response_model=SmtpSettingsOut)
@@ -279,6 +314,7 @@ def update_smtp_settings(body: SmtpSettingsUpdate, user: dict = Depends(verify_t
         "smtp.reply_to_address": body.reply_to_address,
         "smtp.allowlist_enabled": body.allowlist_enabled,
         "smtp.allowed_domains": body.allowed_domains,
+        "smtp.verify_ssl": body.verify_ssl,
     }
 
     with engine.begin() as conn:
@@ -286,7 +322,7 @@ def update_smtp_settings(body: SmtpSettingsUpdate, user: dict = Depends(verify_t
             _upsert_setting(conn, schema, db_type, key, value, user["user_id"], now)
         stored = _read_smtp_settings_rows(conn, schema, db_type)
 
-    return _build_settings_out(stored, _password_is_set(backend))
+    return _build_settings_out(stored, _password_row_exists(backend))
 
 
 @router.put("/smtp/password", status_code=204)
@@ -313,10 +349,17 @@ def send_smtp_test(body: SmtpTestRequest, user: dict = Depends(verify_token)) ->
     tls_mode = stored.get("tls_mode")
     from_address = stored.get("from_address")
     if not host or not port or not tls_mode or not from_address:
-        raise HTTPException(
-            status_code=400,
-            detail="SMTP is not fully configured. Save host, port, TLS mode, and from address first.",
-        )
+        # Return 200 with ok=False so the UI handles "incomplete config" the
+        # same way it handles a real send failure (consistent contract — see
+        # PR description and the EmailSendError branch below).
+        return {
+            "ok": False,
+            "error": "SMTP is not fully configured. Save host, port, TLS mode, and from address first.",
+        }
+
+    verify_ssl = stored.get("verify_ssl")
+    if verify_ssl is None:
+        verify_ssl = True
 
     password = _load_password(backend)
     try:
@@ -330,6 +373,7 @@ def send_smtp_test(body: SmtpTestRequest, user: dict = Depends(verify_token)) ->
             from_name=stored.get("from_name"),
             reply_to=stored.get("reply_to_address"),
             to=[body.to],
+            verify_ssl=bool(verify_ssl),
             subject="admin-it SMTP test message",
             body=("This is a test message from admin-it.\n\nIf you received this, your SMTP configuration is working."),
         )

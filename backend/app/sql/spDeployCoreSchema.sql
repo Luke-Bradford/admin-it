@@ -276,10 +276,10 @@ IF NOT EXISTS (SELECT 1 FROM sys.tables t
                WHERE s.name = ''' + @SchemaName + ''' AND t.name = ''Settings'')
 BEGIN
     CREATE TABLE [' + @SchemaName + '].[Settings] (
-        SettingKey   NVARCHAR(100)    NOT NULL PRIMARY KEY,
-        SettingValue NVARCHAR(MAX)    NOT NULL,
-        UpdatedAt    DATETIME2        NOT NULL DEFAULT SYSUTCDATETIME(),
-        UpdatedBy    UNIQUEIDENTIFIER NULL
+        [SettingKey]   NVARCHAR(100)    NOT NULL PRIMARY KEY,
+        [SettingValue] NVARCHAR(MAX)    NOT NULL,
+        [UpdatedAt]    DATETIME2        NOT NULL DEFAULT SYSUTCDATETIME(),
+        [UpdatedBy]    UNIQUEIDENTIFIER NULL
     );
 END
 ';
