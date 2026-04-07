@@ -199,6 +199,19 @@ CREATE TABLE IF NOT EXISTS "__SCHEMA__"."audit_log" (
 );
 
 -- ──────────────────────────────────────────────
+-- SETTINGS
+-- Generic key/value table for application settings (e.g. SMTP config).
+-- Values are JSON-encoded text. Mutable in place; audit at the route layer.
+-- ──────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS "__SCHEMA__"."Settings" (
+    "SettingKey"   VARCHAR(100) NOT NULL PRIMARY KEY,
+    "SettingValue" TEXT         NOT NULL,
+    "UpdatedAt"    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    "UpdatedBy"    UUID
+);
+
+-- ──────────────────────────────────────────────
 -- AUDIT TRIGGER FUNCTION
 -- Shared by all audited tables.
 -- Uses current_setting('app.current_user_id', true) to get the caller's

@@ -13,6 +13,7 @@ import DataBrowserPage from './pages/DataBrowserPage';
 import UsersPage from './pages/UsersPage';
 import SavedQueriesPage from './pages/SavedQueriesPage';
 import AuditLogPage from './pages/AuditLogPage';
+import SmtpSettingsPage from './pages/SmtpSettingsPage';
 import ProfilePage from './pages/ProfilePage';
 import Layout from './components/Layout';
 import AppShell from './components/AppShell';
@@ -155,6 +156,17 @@ export default function App() {
             <RequireAuth>
               <AppShell>
                 <AuditLogPage />
+              </AppShell>
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/settings/smtp"
+          element={
+            <RequireAuth>
+              <AppShell>
+                <SmtpSettingsPage />
               </AppShell>
             </RequireAuth>
           }

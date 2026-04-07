@@ -265,6 +265,26 @@ END
 ';
 
 -----------------------------------------
+-- SETTINGS
+-- Generic key/value table for application settings (e.g. SMTP config).
+-- Values are JSON-encoded text. Not system-versioned: rows are intentionally
+-- mutable in place; for an audit trail, audit at the route layer.
+-----------------------------------------
+SET @sql += '
+IF NOT EXISTS (SELECT 1 FROM sys.tables t
+               JOIN sys.schemas s ON t.schema_id = s.schema_id
+               WHERE s.name = ''' + @SchemaName + ''' AND t.name = ''Settings'')
+BEGIN
+    CREATE TABLE [' + @SchemaName + '].[Settings] (
+        [SettingKey]   NVARCHAR(100)    NOT NULL PRIMARY KEY,
+        [SettingValue] NVARCHAR(MAX)    NOT NULL,
+        [UpdatedAt]    DATETIME2        NOT NULL DEFAULT SYSUTCDATETIME(),
+        [UpdatedBy]    UNIQUEIDENTIFIER NULL
+    );
+END
+';
+
+-----------------------------------------
 -- Seed Data for Roles and Permissions
 -----------------------------------------
 SET @sql += '
