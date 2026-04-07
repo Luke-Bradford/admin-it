@@ -14,12 +14,6 @@ logger = logging.getLogger(__name__)
 
 TlsMode = Literal["none", "starttls", "tls"]
 
-_CSV_MIME = ("text", "csv")
-_XLSX_MIME = (
-    "application",
-    "vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-)
-
 
 class EmailSendError(Exception):
     """Raised when an email cannot be sent. Message is the underlying error."""
@@ -28,9 +22,9 @@ class EmailSendError(Exception):
 def _attachment_mime(filename: str) -> tuple[str, str]:
     lower = filename.lower()
     if lower.endswith(".csv"):
-        return _CSV_MIME
+        return ("text", "csv")
     if lower.endswith(".xlsx"):
-        return _XLSX_MIME
+        return ("application", "vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     # Generic fallback — caller should normally use one of the two above.
     return ("application", "octet-stream")
 

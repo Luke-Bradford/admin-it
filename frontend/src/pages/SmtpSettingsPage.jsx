@@ -95,10 +95,21 @@ export default function SmtpSettingsPage() {
 
   function addDomain() {
     const d = domainDraft.trim().toLowerCase();
-    if (!d || form.allowed_domains.includes(d)) {
+    if (!d) {
       setDomainDraft('');
       return;
     }
+    // Mirror the backend regex so the user gets immediate feedback rather
+    // than a 422 from Pydantic at save time.
+    if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(d)) {
+      setError(`Invalid domain: ${d}`);
+      return;
+    }
+    if (form.allowed_domains.includes(d)) {
+      setDomainDraft('');
+      return;
+    }
+    setError(null);
     update('allowed_domains', [...form.allowed_domains, d]);
     setDomainDraft('');
   }
@@ -112,13 +123,18 @@ export default function SmtpSettingsPage() {
 
   async function handleSave(e) {
     e.preventDefault();
-    setSaving(true);
     setError(null);
     setSavedMsg(null);
+    const portNum = Number(form.port);
+    if (!Number.isFinite(portNum) || portNum < 1 || portNum > 65535) {
+      setError('Port must be a number between 1 and 65535.');
+      return;
+    }
+    setSaving(true);
     try {
       const payload = {
         ...form,
-        port: Number(form.port),
+        port: portNum,
         username: form.username || null,
         from_name: form.from_name || null,
         reply_to_address: form.reply_to_address || null,

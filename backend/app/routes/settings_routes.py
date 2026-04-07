@@ -164,23 +164,26 @@ def _read_smtp_settings_rows(conn, schema: str, db_type: str) -> dict[str, Any]:
     return out
 
 
-def _password_row_exists(backend) -> bool:
+def _password_row_exists_in_conn(conn, schema: str, db_type: str) -> bool:
     """Return True iff a row keyed SMTP_PASSWORD exists in [adm].[Secrets].
 
-    Uses a direct SELECT — does NOT call `fetch_secret`, because that helper
-    raises a generic `RuntimeError` for not-found and would force us to
-    swallow ALL RuntimeErrors here. We only want to treat row-absence as
-    'not set'; any other error (DB down, permission denied) must propagate
-    so the admin sees a real error rather than being told 'no password set'
-    and overwriting a still-encrypted secret.
+    Uses a direct SELECT on the supplied connection — does NOT call
+    `fetch_secret`, because that helper raises a generic `RuntimeError` for
+    not-found and would force us to swallow ALL RuntimeErrors here. We only
+    want to treat row-absence as 'not set'; any other error (DB down,
+    permission denied) must propagate so the admin sees a real error rather
+    than being told 'no password set' and overwriting a still-encrypted
+    secret.
+
+    Takes the conn as a parameter so callers can include this check in the
+    same transaction as their settings reads/writes — otherwise a concurrent
+    `PUT /smtp/password` could commit between the two connections and the
+    response would show a stale `password_set` value.
     """
-    engine = backend.get_engine()
-    table = qi(backend.schema, "Secrets", backend.db_type)
-    with engine.connect() as conn:
-        row = conn.execute(
-            text(f'SELECT 1 FROM {table} WHERE "SecretType" = :st'),
-            {"st": SMTP_PASSWORD_SECRET},
-        ).fetchone()
+    row = conn.execute(
+        text(f'SELECT 1 FROM {qi(schema, "Secrets", db_type)} WHERE "SecretType" = :st'),
+        {"st": SMTP_PASSWORD_SECRET},
+    ).fetchone()
     return row is not None
 
 
@@ -292,7 +295,8 @@ def get_smtp_settings(user: dict = Depends(verify_token)) -> SmtpSettingsOut:
     engine = backend.get_engine()
     with engine.connect() as conn:
         stored = _read_smtp_settings_rows(conn, backend.schema, backend.db_type)
-    return _build_settings_out(stored, _password_row_exists(backend))
+        password_set = _password_row_exists_in_conn(conn, backend.schema, backend.db_type)
+    return _build_settings_out(stored, password_set)
 
 
 @router.put("/smtp", response_model=SmtpSettingsOut)
@@ -321,8 +325,9 @@ def update_smtp_settings(body: SmtpSettingsUpdate, user: dict = Depends(verify_t
         for key, value in field_to_value.items():
             _upsert_setting(conn, schema, db_type, key, value, user["user_id"], now)
         stored = _read_smtp_settings_rows(conn, schema, db_type)
+        password_set = _password_row_exists_in_conn(conn, schema, db_type)
 
-    return _build_settings_out(stored, _password_row_exists(backend))
+    return _build_settings_out(stored, password_set)
 
 
 @router.put("/smtp/password", status_code=204)
