@@ -111,6 +111,12 @@ def send_email(
                         )
                     client.login(username, password)
                 client.send_message(msg)
+    except smtplib.SMTPAuthenticationError as e:
+        # The server's auth response can echo the username back. Log the
+        # full response for the operator (audit trail) but surface only the
+        # SMTP code in the API/UI to avoid round-tripping credentials.
+        logger.warning("[email_sender] SMTP auth failed: %s", e)
+        raise EmailSendError(f"SMTP authentication failed (code {getattr(e, 'smtp_code', '?')})")
     except (smtplib.SMTPException, OSError) as e:
         logger.warning("[email_sender] Send failed: %s", e)
         raise EmailSendError(str(e))

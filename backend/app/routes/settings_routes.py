@@ -287,6 +287,8 @@ def _build_settings_out(stored: dict[str, Any], password_set: bool) -> SmtpSetti
         reply_to_address=stored.get("reply_to_address"),
         allowlist_enabled=bool(stored.get("allowlist_enabled") or False),
         allowed_domains=list(stored.get("allowed_domains") or []),
+        # Any non-False stored value (including missing or JSON-corrupt) → True;
+        # only an explicit False disables verification.
         verify_ssl=stored.get("verify_ssl", True) is not False,
         password_set=password_set,
     )

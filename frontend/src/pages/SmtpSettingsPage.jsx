@@ -83,7 +83,7 @@ export default function SmtpSettingsPage() {
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [isAdmin, user]);
+  }, [user, isAdmin]);
 
   if (user === null) return <div className="p-6 text-sm text-gray-500">Loading…</div>;
   if (!isAdmin) return <Navigate to="/dashboard" replace />;
@@ -159,7 +159,10 @@ export default function SmtpSettingsPage() {
   }
 
   async function handlePasswordSave() {
-    if (!passwordInput) return;
+    if (!passwordInput.trim()) {
+      setError('Password must not be empty or whitespace-only.');
+      return;
+    }
     setPasswordSaving(true);
     setError(null);
     try {
