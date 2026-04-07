@@ -340,6 +340,14 @@ Constraint reminders the implementer must not skip:
 - `ScheduledQueryRun.Status` CHECK constraint with the exact five values from spec §4.3.
 - Index `(ScheduleId, StartedAt DESC)` on `ScheduledQueryRun` for the "last N runs" query.
 
+**Plan-level addition to spec §4.1 — leader sync columns:**
+
+`ScheduledQuery` gets two extra columns not in the spec:
+- `NeedsSync BIT NOT NULL DEFAULT 1` — set to 1 by any non-leader-worker mutation; cleared by the leader after it has applied the change to its in-process scheduler.
+- `LastSyncedAt DATETIME2 NULL` — bookkeeping for the leader's poll-for-changes loop.
+
+These exist purely to support the DB-only mutation pattern in Step 3.8 / Step 4.8 (the leader picks up changes via polling, never via direct in-process calls from non-leader workers). They are not user-visible and are not returned by the API. Spec §4.1 should be updated to mention them; tracked in the followup notes for this plan PR.
+
 ## Step 3.2 — Add new dependencies
 
 **File:** `backend/requirements.txt`
@@ -599,18 +607,34 @@ For each handler:
 2. Role check as the first line.
 3. Owner-or-admin check via `_assert_owner_or_admin(schedule, current_user)` for PATCH/DELETE/enable/disable.
 4. Validation via `validate_schedule(...)`.
-5. Mutations: write to DB, then call `sync.add_or_update_job(...)` if this is the leader worker. If not the leader, log "deferred to leader" — the leader picks up the change on its 60s tick. Return `scheduler_registered: <bool>` accordingly.
+5. **Mutations: write to DB only. Never call `sync.add_or_update_job` / `sync.remove_job` from a route handler.** The route handler runs on whatever worker accepted the HTTP request; that's almost always *not* the leader. Calling `sync.*` directly would crash on non-leader workers because their `AsyncIOScheduler` instance doesn't exist.
+
+Instead: route handlers write to the DB and set a `NeedsSync BIT` flag (or bump an `UpdatedAt` column the leader watches) on the affected schedule. The leader's `sync.poll_for_changes()` task runs every `LEADER_CHECK_INTERVAL_SECONDS` (60s by default) and picks up any rows where `NeedsSync=1` or `UpdatedAt > LastSyncedAt`, then calls `add_or_update_job` / `remove_job` on its in-process scheduler. Return `scheduler_registered: false` from the route handler if the caller is not the leader, `true` if it is. Most callers will get `false` and the schedule will fire after the next sync tick (worst case 60s lag).
+
+For tighter propagation in single-worker deployments (the common case), the leader can also watch a `pg_notify` channel (Postgres) or a `Service Broker` queue (SQL Server) — but this is **deferred to a future ticket**. v1 uses the 60s polling tick and accepts the latency.
 
 ## Step 3.9 — `/test` endpoint (special case in PR 3)
 
 `POST /api/schedules/{id}/test` is the only manual trigger in PR 3. It needs to:
 1. Load the schedule.
-2. Execute the saved query under the **caller's** user id (not the owner's, since this is a self-test).
-3. Render the attachment.
-4. Send the email **to the caller's own email address only**.
-5. Write a `ScheduledQueryRun` row with `Kind='test'`, `triggered_by_user_id=caller`, `recipient_emails_sent=[caller_email]`. **Does not update `LastRunAt` / `LastRunStatus`** on the schedule.
+2. Execute the saved query under the **caller's** user id (not the owner's). See "Why caller's identity, not owner's" below.
+3. Resolve parameters using the schedule's frozen values + tokens.
+4. Render the attachment.
+5. Send the email **to the caller's own email address only**.
+6. Write a `ScheduledQueryRun` row with `Kind='test'`, `triggered_by_user_id=caller`, `recipient_emails_sent=[caller_email]`. **Does not update `LastRunAt` / `LastRunStatus`** on the schedule.
 
-This duplicates ~30 lines of what PR 4's runner will do, but it's necessary to make PR 3 deliverable on its own. PR 4 will refactor `/test` to call the shared runner with a `kind='test'` argument.
+**Why caller's identity, not owner's:**
+
+A test is *the caller testing the schedule*, not a preview of what recipients will see. The caller's permissions and masking apply because:
+
+- Recipients of a real run see what the *owner* would see in the live UI (spec §9). Recipients have no admin-it identity.
+- A test goes to the caller alone. The caller is an admin-it user with their own role and masking. Showing them the owner's view would either (a) leak data the caller shouldn't see, or (b) hide data the caller can see — both wrong.
+- If a caller wants to preview exactly what recipients will see, they can ask the owner to run `/test`. The owner sees the owner's view; that *is* the recipients' preview.
+- Acknowledged consequence: a Power User testing another user's schedule sees a slightly different result than the recipients will. This is the right tradeoff because the alternative — letting a tester see data under someone else's permissions — is a privilege escalation.
+
+PR 4 will refactor `/test` to call the shared runner with a `kind='test', as_user=caller` argument. The runner already takes `as_user_id` per Step 1.2, so this is a one-line plumbing change.
+
+This step duplicates ~30 lines of what PR 4's runner will do, but it's necessary to make PR 3 deliverable on its own.
 
 ## Step 3.10 — Tests
 
@@ -680,12 +704,38 @@ def per_schedule_lock(engine: Engine, schema: str, schedule_id: UUID):
     Context manager that acquires a per-schedule application lock.
     Yields True if acquired, False if not. Releases on exit.
 
-    SQL Server: sp_getapplock @Resource = 'scheduled_query:{schedule_id}', ...
+    SQL Server: sp_getapplock @Resource = 'scheduled_query:{schedule_id}',
+                @LockMode = 'Exclusive', @LockOwner = 'Session', @LockTimeout = 0
     Postgres:   pg_try_advisory_lock(hashtext('scheduled_query:{schedule_id}'))
     """
 ```
 
-The lock connection is dedicated and closed in the context manager's `finally` block — never the same connection used for the actual query work.
+**Critical SQLAlchemy connection-pool gotcha:**
+
+`sp_getapplock` with `@LockOwner='Session'` ties the lock to the SQL Server session. If we acquire the lock on a SQLAlchemy `Connection`, then call `connection.close()`, SQLAlchemy returns the connection to the pool — it does **not** end the session. The lock travels with the connection. The next request that checks out the same connection from the pool will inherit a phantom lock, and the runner that originally acquired it will lose its release semantics.
+
+The implementer must use **`connection.detach()` followed by `connection.close()`** to ensure the connection is genuinely destroyed, not pooled:
+
+```python
+@contextmanager
+def per_schedule_lock(engine, schema, schedule_id):
+    conn = engine.connect()
+    conn.detach()  # remove from pool — this connection will be destroyed on close
+    try:
+        result = conn.execute(text("EXEC sp_getapplock ..."), {...}).scalar()
+        got = result >= 0
+        yield got
+    finally:
+        if got:
+            conn.execute(text("EXEC sp_releaseapplock ..."), {...})
+        conn.close()  # truly closes because of detach()
+```
+
+Alternative: use `@LockOwner='Transaction'` and wrap the entire run in one transaction. **Rejected** because the run can take minutes and we don't want to hold a transaction open that long. `Session` + `detach()` is the correct pattern.
+
+For Postgres `pg_try_advisory_lock`, the same concern applies — the lock is session-scoped. Use `pg_advisory_unlock` explicitly in `finally` and `connection.detach()` for symmetry.
+
+**Tests:** the test suite must include a "lock survives connection pool recycle" check — acquire a lock, close the connection, check out a fresh connection from the pool, attempt to acquire the same lock, assert it succeeds (proving the previous holder genuinely released).
 
 ## Step 4.3 — Real runner
 
@@ -740,6 +790,14 @@ async def _do_run(run_id: UUID, schedule_id: UUID, kind: str) -> None:
     now_utc = datetime.now(timezone.utc)
     resolved = _resolve_parameters(schedule, now_utc)
 
+    # See spec §3.5 BEFORE writing this section. asyncio.wait_for cannot
+    # cancel a thread spawned by asyncio.to_thread — the thread keeps
+    # running until the DB returns. To bound the actual query execution
+    # rather than just the await, set a query-level timeout via pyodbc
+    # (`cursor.timeout = RUN_TIMEOUT_SECONDS` before .execute) or
+    # psycopg's `statement_timeout` GUC. The wait_for wrapper still
+    # exists as a backstop so the runner coroutine doesn't hang
+    # indefinitely if the driver-level timeout fails for any reason.
     rows, columns, total, truncated = await asyncio.to_thread(
         execute_saved_query,
         engine, schema, saved_query.id,
@@ -844,12 +902,14 @@ Registered as a one-shot job at scheduler startup (spec §3.7 step 3).
 ## Step 4.8 — Saved query / connection deletion handling
 
 When the runner detects the saved query has `IsDeleted=1` or its connection has been removed, it raises `SavedQueryGoneError` which is caught at the top level and:
-1. Sets `IsEnabled=0` on the schedule (auto-disable).
-2. Removes the job from APScheduler.
+1. Sets `IsEnabled=0` on the schedule (auto-disable) **in the DB only**.
+2. Sets `NeedsSync=1` on the schedule so the leader's next sync tick removes it from APScheduler. **Does not** call `sync.remove_job` directly — the runner may be executing on a non-leader worker (for `/run-now` and `/test`) where the scheduler instance doesn't exist. The same DB-only mutation pattern from Step 3.8 applies.
 3. Logs `audit_log` entry `scheduled_query.auto_disabled`.
 4. Sends failure notification to admins.
 
 Spec §10 covers this; the implementer should match the table exactly.
+
+**Worked-example reasoning for the DB-only pattern:** an admin uses `POST /run-now` from their browser → request lands on worker B → worker B is not the leader → worker B's runner detects the saved query has been soft-deleted → worker B sets `IsEnabled=0` and `NeedsSync=1` → returns 200 with the failure notification queued → leader worker A picks up the change on its next 60s sync tick and calls `remove_job` on its in-process APScheduler. No worker ever calls `remove_job` on a scheduler it doesn't own.
 
 ## Step 4.9 — Tests
 
