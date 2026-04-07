@@ -95,6 +95,20 @@ def send_email(
                     client.starttls(context=ssl_context)
                     client.ehlo()
                 if username and password:
+                    if tls_mode == "none":
+                        # smtplib.login negotiates the strongest mechanism the
+                        # server advertises, which on a non-TLS connection may
+                        # be PLAIN or LOGIN — i.e. credentials in cleartext.
+                        # Some self-hosted relays genuinely require auth over
+                        # plaintext on a trusted network, so we don't refuse,
+                        # but we surface a clear warning so the operator
+                        # cannot do this by accident.
+                        logger.warning(
+                            "[email_sender] Authenticating to %s:%s with tls_mode='none' — "
+                            "credentials will be transmitted unencrypted",
+                            host,
+                            port,
+                        )
                     client.login(username, password)
                 client.send_message(msg)
     except (smtplib.SMTPException, OSError) as e:

@@ -120,6 +120,16 @@ class SmtpSettingsUpdate(BaseModel):
 class SmtpPasswordUpdate(BaseModel):
     password: str = Field(min_length=1, max_length=500)
 
+    @field_validator("password")
+    @classmethod
+    def _check_password(cls, v: str) -> str:
+        # A password of pure whitespace is almost certainly a paste error and
+        # would silently break the next outbound send. Reject it at the
+        # boundary rather than encrypting and storing it.
+        if not v.strip():
+            raise ValueError("Password must not be empty or whitespace-only")
+        return v
+
 
 class SmtpTestRequest(BaseModel):
     to: str = Field(min_length=3, max_length=320)
@@ -277,7 +287,7 @@ def _build_settings_out(stored: dict[str, Any], password_set: bool) -> SmtpSetti
         reply_to_address=stored.get("reply_to_address"),
         allowlist_enabled=bool(stored.get("allowlist_enabled") or False),
         allowed_domains=list(stored.get("allowed_domains") or []),
-        verify_ssl=bool(stored.get("verify_ssl") if stored.get("verify_ssl") is not None else True),
+        verify_ssl=stored.get("verify_ssl", True) is not False,
         password_set=password_set,
     )
 
@@ -366,7 +376,10 @@ def send_smtp_test(body: SmtpTestRequest, user: dict = Depends(verify_token)) ->
             "error": "SMTP is not fully configured. Save host, port, TLS mode, and from address first.",
         }
 
-    verify_ssl = stored.get("verify_ssl", True)
+    # Default to True (verify) for both missing and any decode-corrupted
+    # value. Never let an unexpected None silently disable verification.
+    verify_ssl_raw = stored.get("verify_ssl", True)
+    verify_ssl = verify_ssl_raw is not False
     try:
         send_email(
             host=host,
@@ -378,7 +391,7 @@ def send_smtp_test(body: SmtpTestRequest, user: dict = Depends(verify_token)) ->
             from_name=stored.get("from_name"),
             reply_to=stored.get("reply_to_address"),
             to=[body.to],
-            verify_ssl=bool(verify_ssl),
+            verify_ssl=verify_ssl,
             subject="admin-it SMTP test message",
             body=("This is a test message from admin-it.\n\nIf you received this, your SMTP configuration is working."),
         )
