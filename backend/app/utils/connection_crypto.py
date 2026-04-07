@@ -33,6 +33,30 @@ def encrypt_credentials(backend: CoreBackend, credentials: dict) -> str:
     return f.encrypt(json.dumps(credentials).encode("utf-8")).decode("utf-8")
 
 
+def encrypt_value(backend: CoreBackend, value: str) -> str:
+    """Encrypt a single string value with the CONNECTION_KEY Fernet key.
+
+    Used for opaque secrets (e.g. SMTP password) that don't fit the dict-shaped
+    `encrypt_credentials` helper. Reuses CONNECTION_KEY rather than introducing a
+    second key — see project_query_scheduling_pr2_handoff.
+    """
+    f = _get_fernet(backend)
+    return f.encrypt(value.encode("utf-8")).decode("utf-8")
+
+
+def decrypt_value(backend: CoreBackend, token: str) -> str:
+    """Decrypt a single string value previously written by `encrypt_value`."""
+    f = _get_fernet(backend)
+    try:
+        return f.decrypt(token.encode("utf-8")).decode("utf-8")
+    except InvalidToken:
+        logger.error("[connection_crypto] Failed to decrypt opaque secret — token corrupt or wrong key")
+        raise HTTPException(
+            status_code=500,
+            detail="Server configuration error: could not decrypt stored secret",
+        )
+
+
 def decrypt_credentials(backend: CoreBackend, token: str) -> dict:
     """Decrypt a stored Fernet token and return the credentials dict."""
     f = _get_fernet(backend)

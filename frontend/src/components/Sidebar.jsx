@@ -1,6 +1,9 @@
 // src/components/Sidebar.jsx
-import React, { useState } from 'react';
+import React, { useContext, useState } from 'react';
 import { NavLink } from 'react-router-dom';
+import { UserContext } from '../context/UserContext';
+
+const ADMIN_ROLES = new Set(['Admin', 'SystemAdmin']);
 
 const NAV_ITEMS = [
   {
@@ -80,6 +83,27 @@ const NAV_ITEMS = [
     implemented: true,
   },
   {
+    label: 'SMTP Settings',
+    path: '/settings/smtp',
+    icon: (
+      <svg
+        className="w-5 h-5 shrink-0"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.75}
+        viewBox="0 0 24 24"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M3 8l9 6 9-6M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+        />
+      </svg>
+    ),
+    implemented: true,
+    adminOnly: true,
+  },
+  {
     label: 'Audit Log',
     path: '/audit',
     icon: (
@@ -108,6 +132,9 @@ const DISABLED_ITEM = 'text-gray-600 cursor-not-allowed select-none';
 
 export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
+  const user = useContext(UserContext);
+  const isAdmin = !!user?.roles?.some((r) => ADMIN_ROLES.has(r));
+  const visibleItems = NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin);
 
   return (
     <aside
@@ -147,7 +174,7 @@ export default function Sidebar() {
 
       {/* Nav items */}
       <nav className="flex-1 py-3 space-y-0.5 overflow-y-auto">
-        {NAV_ITEMS.map((item) => {
+        {visibleItems.map((item) => {
           if (!item.implemented) {
             return (
               <div
