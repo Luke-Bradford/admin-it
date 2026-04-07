@@ -36,6 +36,7 @@ from sqlalchemy import text
 from app.routes.browse_routes import TARGET_QUERY_TIMEOUT_SECONDS, _open_target, _require_connection_access
 from app.utils.audit_helpers import log_masked_access_audit, log_query_export_audit, log_query_run_audit
 from app.utils.auth_dependency import ADMIN_ROLES, verify_token
+from app.utils.constants import MAX_EXPORT_ROWS
 from app.utils.db_helpers import get_backend
 from app.utils.mask_helpers import load_masks_for_connection
 from app.utils.sql_helpers import quote_ident as qi
@@ -45,7 +46,6 @@ logger = logging.getLogger(__name__)
 
 POWER_AND_ABOVE: set[str] = {"PowerUser", "Admin", "SystemAdmin"}
 MAX_PAGE_SIZE = 200
-MAX_EXPORT_ROWS = 10_000
 
 # Regex for `:name` placeholder extraction and rewrite.
 # Negative lookahead prevents partial matches (e.g. :user_id must not match inside :user_id_ext).
