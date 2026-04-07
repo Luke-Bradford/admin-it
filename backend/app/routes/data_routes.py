@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 from app.routes.browse_routes import TARGET_QUERY_TIMEOUT_SECONDS, _open_target, _require_connection_access
 from app.utils.audit_helpers import log_export_audit, log_masked_access_audit
 from app.utils.auth_dependency import ADMIN_ROLES, verify_token
+from app.utils.constants import MAX_EXPORT_ROWS
 from app.utils.db_helpers import get_backend
 from app.utils.mask_helpers import load_masks
 
@@ -37,9 +38,6 @@ logger = logging.getLogger(__name__)
 # Maximum rows that can be returned in a single page.
 MAX_PAGE_SIZE = 200
 DEFAULT_PAGE_SIZE = 50
-
-# Maximum rows returned by a single export request.
-MAX_EXPORT_ROWS = 10_000
 
 # Supported filter operators and their SQL fragments.
 # Values are always supplied as bind params; column names are bracket-quoted
