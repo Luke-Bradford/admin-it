@@ -187,19 +187,18 @@ def _password_row_exists_in_conn(conn, schema: str, db_type: str) -> bool:
     return row is not None
 
 
-def _load_password(backend) -> str | None:
+def _load_password_in_conn(conn, backend, schema: str, db_type: str) -> str | None:
     """Return the decrypted SMTP password, or None if no row exists.
 
-    Mirrors `_password_row_exists`: only row-absence yields None. Any
-    decrypt failure propagates as HTTPException(500) via decrypt_value.
+    Mirrors `_password_row_exists_in_conn`: takes the conn so callers can
+    keep the read in the same transaction as the settings read. Only
+    row-absence yields None; any decrypt failure propagates as
+    HTTPException(500) via `decrypt_value`.
     """
-    engine = backend.get_engine()
-    table = qi(backend.schema, "Secrets", backend.db_type)
-    with engine.connect() as conn:
-        row = conn.execute(
-            text(f'SELECT "SecretValue" FROM {table} WHERE "SecretType" = :st'),
-            {"st": SMTP_PASSWORD_SECRET},
-        ).fetchone()
+    row = conn.execute(
+        text(f'SELECT "SecretValue" FROM {qi(schema, "Secrets", db_type)} WHERE "SecretType" = :st'),
+        {"st": SMTP_PASSWORD_SECRET},
+    ).fetchone()
     if row is None:
         return None
     return decrypt_value(backend, row[0])
@@ -346,8 +345,13 @@ def send_smtp_test(body: SmtpTestRequest, user: dict = Depends(verify_token)) ->
     _require_admin(user)
     backend = get_backend()
     engine = backend.get_engine()
+    schema = backend.schema
+    db_type = backend.db_type
+    # Read settings + password in a single connection so a concurrent
+    # PUT /smtp/password cannot commit between the two reads.
     with engine.connect() as conn:
-        stored = _read_smtp_settings_rows(conn, backend.schema, backend.db_type)
+        stored = _read_smtp_settings_rows(conn, schema, db_type)
+        password = _load_password_in_conn(conn, backend, schema, db_type)
 
     host = stored.get("host")
     port = stored.get("port")
@@ -362,11 +366,7 @@ def send_smtp_test(body: SmtpTestRequest, user: dict = Depends(verify_token)) ->
             "error": "SMTP is not fully configured. Save host, port, TLS mode, and from address first.",
         }
 
-    verify_ssl = stored.get("verify_ssl")
-    if verify_ssl is None:
-        verify_ssl = True
-
-    password = _load_password(backend)
+    verify_ssl = stored.get("verify_ssl", True)
     try:
         send_email(
             host=host,

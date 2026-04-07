@@ -121,8 +121,8 @@ export default function SmtpSettingsPage() {
     );
   }
 
-  async function handleSave(e) {
-    e.preventDefault();
+  async function handleSave(event) {
+    event.preventDefault();
     setError(null);
     setSavedMsg(null);
     const portNum = Number(form.port);
@@ -151,8 +151,8 @@ export default function SmtpSettingsPage() {
       const data = await res.json();
       setPasswordSet(!!data.password_set);
       setSavedMsg('Settings saved.');
-    } catch (e) {
-      setError(e.message);
+    } catch (err) {
+      setError(err.message);
     } finally {
       setSaving(false);
     }
@@ -172,8 +172,8 @@ export default function SmtpSettingsPage() {
       setPasswordInput('');
       setPasswordSet(true);
       setSavedMsg('Password updated.');
-    } catch (e) {
-      setError(e.message);
+    } catch (err) {
+      setError(err.message);
     } finally {
       setPasswordSaving(false);
     }
@@ -194,8 +194,8 @@ export default function SmtpSettingsPage() {
       } else {
         setTestResult(body);
       }
-    } catch (e) {
-      setTestResult({ ok: false, error: e.message });
+    } catch (err) {
+      setTestResult({ ok: false, error: err.message });
     } finally {
       setTestSending(false);
     }
