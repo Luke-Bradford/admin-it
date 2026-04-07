@@ -412,6 +412,8 @@ The `Literal[...]` exists separately from `ALLOWED_TOKENS` because Pydantic need
 
 ## Step 3.4 — Pydantic models for schedules
 
+> **Pydantic version note:** this project uses **Pydantic v1** (see `CLAUDE.md` stack notes). The snippets below use v1 syntax: `@root_validator`, `Field(min_items=1)`, etc. Do not pre-emptively migrate to v2 syntax — the project has not migrated and a partial migration would break other models.
+
 **File:** `backend/app/models/schedule.py` (new)
 
 ```python
