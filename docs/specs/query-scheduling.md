@@ -66,7 +66,7 @@ def run_schedule(schedule_id, kind="cron"):
 
         run = create_run_row(schedule_id, kind, status="running")
         try:
-            with timeout(5_minutes):
+            with timeout(5_minutes):  # see §3.5 for the concrete mechanism
                 schedule = load_schedule(schedule_id)
                 if schedule.is_deleted or not schedule.is_enabled:
                     return
@@ -100,6 +100,16 @@ def run_schedule(schedule_id, kind="cron"):
             finalise_run(run, status="failure", error=str(e))
             notify_owner_or_admins(schedule, e)
 ```
+
+### 3.5 Per-run timeout mechanism
+
+APScheduler does not enforce a timeout on `AsyncIOScheduler` jobs. The 5-minute cap is enforced explicitly by the runner via **`asyncio.wait_for(coro, timeout=RUN_TIMEOUT_SECONDS)`** wrapping the inner work coroutine. On timeout, `asyncio.TimeoutError` is raised and the runner records `Status='failure'` with `ErrorMessage='Run exceeded 5 minute timeout'`.
+
+Important consequences of this choice:
+
+- **The DB query itself does not get cancelled by `wait_for`.** `pyodbc`/`psycopg` cursors block in C code that doesn't release the GIL cleanly to `asyncio`. The query executor is therefore wrapped in `asyncio.to_thread(...)` so the timeout aborts the *await* but the underlying cursor keeps running until the DB returns. This is acceptable because the connection is local to the runner thread and is closed immediately after the timeout, which causes most drivers to issue a session-level cancel on connection drop.
+- For SQL Server, an explicit `KILL` of the rogue session is **out of scope for v1** — it requires elevated DB permissions admin-it doesn't otherwise need. Runaway queries will eventually clear when the connection times out at the driver level.
+- Documented as a known limitation in the user guide: "Schedules that consistently hit the 5-minute timeout should be optimised at the SQL level rather than left to time out repeatedly."
 
 ## 4. Data model
 
@@ -394,7 +404,7 @@ Authentication ≠ authorisation. Every route is verified twice — once for a v
 | Result truncated to `MAX_EXPORT_ROWS` | `Status='truncated'`. Attachment contains the 10k rows. Body adds "Result truncated at 10,000 rows. View the full result at {link}." Run still counts as delivered. |
 | Attachment exceeds `MAX_ATTACHMENT_BYTES` after rendering | `Status='failure'`. `ErrorMessage='Attachment exceeds 15MB ({n} bytes). Reduce row count or switch attachment format.'`. Failure notification sent. |
 | Concurrent run already in progress when next tick fires | Per-schedule lock (§3.3) is unavailable. Writes `Status='skipped'`, no email sent. Visible in run history. |
-| Recipient list emptied via a `value_token` mistake or schedule edit | Validation requires non-empty at create/update — but we re-validate at run time too. Empty at run time → `failure: no recipients`. |
+| Recipient list rendered empty by allowlist tightening | A schedule saved while `smtp.allowlist_enabled=false` may have recipients on a domain that an admin later restricts. The runner re-applies the current allowlist and filters recipients before sending. If the filter empties the list → `failure: all recipients blocked by allowlist (admin tightened domain restrictions after schedule creation)`. Failure notification goes to the schedule owner. The schedule is **not** auto-disabled — fixing it is a one-line edit in the SMTP settings or the schedule recipients. |
 | Manual `/test` triggered by a user with no email address on file | 422 — caller has no email to send to. |
 
 ### 10.e Naming
@@ -427,6 +437,8 @@ A daily housekeeping job (`run_history_cleanup`) registered with the same schedu
 - Runs at 03:00 in the server's timezone.
 - Deletes `ScheduledQueryRun` rows where `Status IN ('success','truncated','skipped')` AND `StartedAt < now() - 90 days`.
 - **Never deletes `failure` rows.** They accumulate until the schedule is deleted (which cascades).
+
+`truncated` is bundled with `success` for retention purposes as a deliberate choice: a truncated run *did* deliver an email and is not an actionable failure. The tradeoff is that an admin investigating "why did the March report only show 10k rows?" six weeks later will still see the run row (90 days > 6 weeks), but a year later they will not. If long-term truncation visibility becomes important, the right fix is to add a separate `truncated_retention_days` constant — not to keep all truncated runs forever.
 
 The 90-day constant lives in `constants.py` and is not configurable in v1. When a real user asks for a different value, move it to `[adm].[Settings]`.
 
