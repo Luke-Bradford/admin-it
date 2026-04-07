@@ -431,7 +431,7 @@ export default function SmtpSettingsPage() {
           <button
             type="button"
             onClick={handlePasswordSave}
-            disabled={passwordSaving || !passwordInput}
+            disabled={passwordSaving || !passwordInput.trim()}
             className="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50"
           >
             {passwordSaving ? 'Saving…' : 'Update password'}
@@ -484,7 +484,7 @@ export default function SmtpSettingsPage() {
               </button>
               <button
                 type="button"
-                disabled={testSending || !testTo}
+                disabled={testSending || !testTo.trim()}
                 onClick={handleSendTest}
                 className="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50"
               >
