@@ -83,10 +83,8 @@ def send_email(
             filename=attachment_filename,
         )
 
-    if verify_ssl:
-        ssl_context = ssl.create_default_context()
-    else:
-        ssl_context = ssl.create_default_context()
+    ssl_context = ssl.create_default_context()
+    if not verify_ssl:
         ssl_context.check_hostname = False
         ssl_context.verify_mode = ssl.CERT_NONE
 
